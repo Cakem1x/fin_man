@@ -17,30 +17,20 @@
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             # Go toolchain
-            go
-            gopls
             delve
-
-            # Database tools
-            sqlite
-            goose
-
-            # SQL/codegen
-            sqlc
-
-            # Build/test helpers
-            just
-            git
-            gnumake
-
-            # Linting/formatting
+            go
             golangci-lint
+            gopls
             gotools
 
-            # Optional: encryption/sync helpers
-            #age
-            #restic
-            #gocryptfs
+            # Database tools
+            goose # db migration manager
+            sqlc # SQL/codegen
+            sqlite
+
+            # misc tools
+            just
+            git
           ];
         };
       });
