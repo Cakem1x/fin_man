@@ -5,4 +5,4 @@ build:
   go build -o ./bin/fin ./cmd/fin
 
 test:
-  go test ./cmd/fin
+  go test -v -race -cover ./...

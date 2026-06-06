@@ -1,4 +1,4 @@
-# Finance CLI Suite — Repository Bootstrap
+# fin_man — Repository Bootstrap
 
 This document restructures the architecture proposal into concrete repository files and documents.
 
@@ -7,7 +7,7 @@ This document restructures the architecture proposal into concrete repository fi
 # Repository Layout
 
 ```text
-finance/
+fin_man/
 ├── flake.nix
 ├── .envrc
 ├── .gitignore
