@@ -29,9 +29,12 @@
               in
               "${pkgs.bash}/bin/sh -c '
                 export PATH=${path}:$PATH
-                export GOCACHE=$TMPDIR/gocache
-                ln -snf ${fin_man.goModules} vendor
-                export GOFLAGS=-mod=vendor
+                if [ -n \"$NIX_BUILD_TOP\" ]; then
+                  export GOCACHE=$(mktemp -d)
+                  ln -snf ${fin_man.goModules} vendor
+                  export GOFLAGS=-mod=vendor
+                  trap \"rm -f vendor\" EXIT
+                fi
                 just lint
               '";
               files = "\\.go$";
