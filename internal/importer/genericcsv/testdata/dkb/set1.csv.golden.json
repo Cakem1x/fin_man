@@ -1,0 +1,58 @@
+[
+  {
+    "ID": "",
+    "Date": "1982-12-28T00:00:00Z",
+    "Payee": "Receiver",
+    "AmountCents": -2121,
+    "Currency": "",
+    "Memo": "Verwendungszweck 4242"
+  },
+  {
+    "ID": "",
+    "Date": "1982-12-27T00:00:00Z",
+    "Payee": "Aa.bbbbb.111/Mmmmmmm",
+    "AmountCents": -4220,
+    "Currency": "",
+    "Memo": "Verwendungszweck 4242"
+  },
+  {
+    "ID": "",
+    "Date": "1982-12-26T00:00:00Z",
+    "Payee": "Receiver",
+    "AmountCents": -133,
+    "Currency": "",
+    "Memo": "Verwendungszweck Umlöäüt"
+  },
+  {
+    "ID": "",
+    "Date": "1982-12-26T00:00:00Z",
+    "Payee": "Receiver",
+    "AmountCents": -1300,
+    "Currency": "",
+    "Memo": "Verwendungszweck 1234"
+  },
+  {
+    "ID": "",
+    "Date": "1982-12-26T00:00:00Z",
+    "Payee": "Recei Ver",
+    "AmountCents": -4200,
+    "Currency": "",
+    "Memo": "Verwendungszweck 4321"
+  },
+  {
+    "ID": "",
+    "Date": "1982-12-24T00:00:00Z",
+    "Payee": "Recei/Ver",
+    "AmountCents": -1011,
+    "Currency": "",
+    "Memo": ":)"
+  },
+  {
+    "ID": "",
+    "Date": "2026-12-14T00:00:00Z",
+    "Payee": "Recei/Ver",
+    "AmountCents": -1011,
+    "Currency": "",
+    "Memo": "the 2000s have called"
+  }
+]

@@ -14,14 +14,17 @@ import (
 
 // Config defines the mapping from CSV columns to Transaction fields.
 type Config struct {
-	HasHeader   bool
-	DateCol     int
-	DateFormat  string
-	PayeeCol    int
-	AmountCol   int
-	CurrencyCol int
-	MemoCol     int
-	Comma       rune
+	HasHeader          bool
+	SkipLines          int
+	DateCol            int
+	DateFormat         string
+	PayeeCol           int
+	AmountCol          int
+	CurrencyCol        int
+	MemoCol            int
+	Comma              rune
+	DecimalSeparator   string
+	ThousandsSeparator string
 }
 
 // Importer implements the TransactionImporter interface for generic CSV files.
@@ -39,6 +42,8 @@ func (imp *Importer) Import(r io.Reader) ([]model.Transaction, error) {
 	if imp.config.Comma == 0 {
 		reader.Comma = ','
 	}
+	// DKB and others sometimes have "wrong" number of fields in meta lines
+	reader.FieldsPerRecord = -1
 
 	var results []model.Transaction
 	line := 0
@@ -53,7 +58,11 @@ func (imp *Importer) Import(r io.Reader) ([]model.Transaction, error) {
 		}
 
 		line++
-		if line == 1 && imp.config.HasHeader {
+		if line <= imp.config.SkipLines {
+			continue
+		}
+
+		if line == imp.config.SkipLines+1 && imp.config.HasHeader {
 			continue
 		}
 
@@ -84,10 +93,9 @@ func (imp *Importer) mapRecord(record []string) (model.Transaction, error) {
 		return model.Transaction{}, fmt.Errorf("parsing date %q: %w", dateStr, err)
 	}
 
-	// Parse Amount (assuming simple decimal string for now, will need more robust parsing later)
+	// Parse Amount
 	amountStr := getCol(imp.config.AmountCol)
-	// Remove common currency separators if any (e.g. "," -> "." etc) - this is a simplification for now
-	amountCents, err := parseAmountToCents(amountStr)
+	amountCents, err := parseAmountToCents(amountStr, imp.config.DecimalSeparator, imp.config.ThousandsSeparator)
 	if err != nil {
 		return model.Transaction{}, fmt.Errorf("parsing amount %q: %w", amountStr, err)
 	}
@@ -103,11 +111,27 @@ func (imp *Importer) mapRecord(record []string) (model.Transaction, error) {
 	}, nil
 }
 
-func parseAmountToCents(s string) (int64, error) {
-	// Very basic implementation: remove dots/commas and parse
-	// In reality we should handle locales properly.
-	// For this generic one, let's assume standard float-like string.
-	f, err := strconv.ParseFloat(strings.ReplaceAll(s, ",", "."), 64)
+func parseAmountToCents(s, decimalSep, thousandSep string) (int64, error) {
+	if s == "" {
+		return 0, nil
+	}
+
+	cleanStr := strings.TrimSpace(s)
+
+	if thousandSep != "" {
+		cleanStr = strings.ReplaceAll(cleanStr, thousandSep, "")
+	}
+
+	if decimalSep != "" && decimalSep != "." {
+		cleanStr = strings.ReplaceAll(cleanStr, decimalSep, ".")
+	}
+
+	// Remove common generic separators if nothing specified (for backwards compatibility)
+	if decimalSep == "" && thousandSep == "" {
+		cleanStr = strings.ReplaceAll(cleanStr, ",", ".")
+	}
+
+	f, err := strconv.ParseFloat(cleanStr, 64)
 	if err != nil {
 		return 0, err
 	}

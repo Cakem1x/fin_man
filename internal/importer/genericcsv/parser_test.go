@@ -2,6 +2,7 @@ package genericcsv_test
 
 import (
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/Cakem1x/fin_man/internal/importer/genericcsv"
 )
+
+var update = flag.Bool("update", false, "update golden files")
 
 func TestGolden(t *testing.T) {
 	// Look for all .csv files in testdata/dkb
@@ -53,7 +56,7 @@ func TestGolden(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 
 			imp := genericcsv.New(cfg)
 			transactions, err := imp.Import(f)
@@ -81,8 +84,14 @@ func TestGolden(t *testing.T) {
 			}
 
 			if string(gotJSON) != string(wantJSON) {
-				t.Errorf("output mismatch for %s. Run with -update to update golden files.", entry.Name())
-				// Simplified: you'd usually have a flag to update
+				if *update {
+					if err := os.WriteFile(goldenPath, gotJSON, 0644); err != nil {
+						t.Fatal(err)
+					}
+					t.Logf("updated golden file: %s", goldenPath)
+				} else {
+					t.Errorf("output mismatch for %s. Run with -update to update golden files.", entry.Name())
+				}
 			}
 		})
 	}
