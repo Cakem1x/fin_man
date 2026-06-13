@@ -1,0 +1,12 @@
+"Girokonto";"DE30301010303010103030"
+
+"Kontostand vom 01.01.1983:";"10.000,42 €"
+""
+"Buchungsdatum";"Wertstellung";"Status";"Zahlungspflichtige*r";"Zahlungsempfänger*in";"Verwendungszweck";"Umsatztyp";"IBAN";"Betrag (€)";"Gläubiger-ID";"Mandatsreferenz";"Kundenreferenz"
+"28.12.82";"28.12.82";"Gebucht";"ISSUER";"Bäckerei Yeah";"Verwendungszweck 4242";"Ausgang";"XX00000000000000000000";"-12,1";"";"";"12341234"
+"28.12.82";"28.12.82";"Gebucht";"ISSUER";"receiver";"Verwendungszweck 4242";"Ausgang";"XX00000000000000000000";"-21,21";"";"";"12341234"
+"27.12.82";"27.12.82";"Gebucht";"ISSUER";"aa.bbbbb.111/Mmmmmmm";"Verwendungszweck 4242";"Ausgang";"XX00000000000000000000";"-42,2";"";"";"12341234"
+"26.12.82";"26.12.82";"Gebucht";"Test Zwei";"RECEIVER";"Verwendungszweck Umlöäüt";"Ausgang";"XX00000000000000000000";"-1,33";"XX00000000000000000000";")hihiHAHA-iAiA?xx)xxxxxxxxx";"12341234"
+"26.12.82";"26.12.82";"Gebucht";"Test Umlöut";"RECEIVER";"Verwendungszweck 1234";"Ausgang";"XX00000000000000000000";"-13";"XX00000000000000000000";"43214321";"12341234"
+"26.12.82";"26.12.82";"Gebucht";"Test";"RECEI VER";"Verwendungszweck 4321";"Ausgang";"XX00000000000000000000";"-42";"";"";""
+"24.12.82";"24.12.82";"Gebucht";"ISSUER";"recei/ver";":)";"Ausgang";"XX00000000000000000000";"-10,11";"";"";"12341234"
