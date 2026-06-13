@@ -35,30 +35,36 @@ func printUsage() {
 
 func handleImportCSV(args []string) {
 	fs := flag.NewFlagSet("import-csv", flag.ExitOnError)
-	configPath := fs.String("config", "", "Path to the config JSON file (shorthand: -c)")
-	fs.StringVar(configPath, "c", "", "Path to the config JSON file (shorthand: -c)")
+	available := genericcsv.AvailableConfigs()
+	configDesc := fmt.Sprintf("Path to config JSON file OR builtin config name %v", available)
+	configPath := fs.String("config", "", configDesc)
+	fs.StringVar(configPath, "c", "", configDesc)
 
 	if err := fs.Parse(args); err != nil {
 		log.Fatalf("failed to parse flags: %v", err)
 	}
 
 	if *configPath == "" || fs.NArg() < 1 {
-		fmt.Println("Usage: fin import-csv -config <cfg> <csv_file>")
+		fmt.Println("Usage: fin import-csv -config <cfg_or_name> <csv_file>")
 		fs.PrintDefaults()
 		os.Exit(1)
 	}
 
 	csvPath := fs.Arg(0)
 
-	// Load config
-	cfgData, err := os.ReadFile(*configPath)
-	if err != nil {
-		log.Fatalf("failed to read config: %v", err)
-	}
-
 	var cfg genericcsv.Config
-	if err := json.Unmarshal(cfgData, &cfg); err != nil {
-		log.Fatalf("failed to unmarshal config: %v", err)
+	// Check if it's a builtin config
+	if builtinCfg, ok := genericcsv.GetBuiltinConfig(*configPath); ok {
+		cfg = builtinCfg
+	} else {
+		// Load config from file
+		cfgData, err := os.ReadFile(*configPath)
+		if err != nil {
+			log.Fatalf("failed to read config file: %v", err)
+		}
+		if err := json.Unmarshal(cfgData, &cfg); err != nil {
+			log.Fatalf("failed to unmarshal config: %v", err)
+		}
 	}
 
 	// Open CSV
