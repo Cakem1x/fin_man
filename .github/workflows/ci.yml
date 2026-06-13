@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
 
 jobs:
   build-test-lint:
@@ -14,6 +14,9 @@ jobs:
 
       - name: Install Nix
         uses: cachix/install-nix-action@v27
+
+      - name: Magic Nix Cache
+        uses: determinate-systems/magic-nix-cache-action@v7
 
       - name: Lint
         run: nix develop --command just lint
