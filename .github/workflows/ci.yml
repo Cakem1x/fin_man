@@ -12,14 +12,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-          cache: true
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
 
-      - name: Install just
-        uses: extractions/setup-just@v2
+      - name: Lint
+        run: nix develop --command just lint
 
-      - name: Run CI checks
-        run: just ci
+      - name: Build
+        run: nix develop --command just build
+
+      - name: Test
+        run: nix develop --command just test
