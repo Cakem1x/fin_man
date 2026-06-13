@@ -16,7 +16,7 @@ jobs:
         uses: cachix/install-nix-action@v27
 
       - name: Magic Nix Cache
-        uses: determinate-systems/magic-nix-cache-action@v7
+        uses: DeterminateSystems/magic-nix-cache-action@v7
 
       - name: Lint
         run: nix develop --command just lint
