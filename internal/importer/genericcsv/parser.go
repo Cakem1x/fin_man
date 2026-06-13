@@ -42,8 +42,9 @@ func (imp *Importer) Import(r io.Reader) ([]model.Transaction, error) {
 	if imp.config.Comma == 0 {
 		reader.Comma = ','
 	}
-	// DKB and others sometimes have "wrong" number of fields in meta lines
+	// banks sometimes have "wrong" number of fields in meta lines
 	reader.FieldsPerRecord = -1
+	reader.LazyQuotes = true
 
 	var results []model.Transaction
 	line := 0
