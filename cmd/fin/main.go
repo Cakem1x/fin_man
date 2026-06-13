@@ -38,7 +38,9 @@ func handleImportCSV(args []string) {
 	configPath := fs.String("config", "", "Path to the config JSON file (shorthand: -c)")
 	fs.StringVar(configPath, "c", "", "Path to the config JSON file (shorthand: -c)")
 
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		log.Fatalf("failed to parse flags: %v", err)
+	}
 
 	if *configPath == "" || fs.NArg() < 1 {
 		fmt.Println("Usage: fin import-csv -config <cfg> <csv_file>")
@@ -64,7 +66,11 @@ func handleImportCSV(args []string) {
 	if err != nil {
 		log.Fatalf("failed to open csv: %v", err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("failed to close file: %v", err)
+		}
+	}()
 
 	// Parse
 	imp := genericcsv.New(cfg)
