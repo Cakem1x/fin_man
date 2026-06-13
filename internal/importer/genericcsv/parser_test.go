@@ -7,10 +7,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/Cakem1x/fin_man/internal/importer/genericcsv"
+	"github.com/Cakem1x/fin_man/internal/model"
 )
 
 var update = flag.Bool("update", false, "update golden files")
@@ -61,22 +63,14 @@ func TestGolden(t *testing.T) {
 			defer func() { _ = f.Close() }()
 
 			imp := genericcsv.New(cfg)
-			transactions, err := imp.Import(f)
+			gotTrans, err := imp.Import(f)
 			if err != nil {
 				t.Fatalf("import failed: %v", err)
 			}
 
-			gotJSON, err := json.MarshalIndent(transactions, "", "  ")
-			if err != nil {
-				t.Fatal(err)
-			}
-
 			// If golden file doesn't exist, create it (bootstrap)
 			if _, err := os.Stat(goldenPath); errors.Is(err, fs.ErrNotExist) {
-				if err := os.WriteFile(goldenPath, gotJSON, 0644); err != nil {
-					t.Fatal(err)
-				}
-				t.Logf("created golden file: %s", goldenPath)
+				writeGolden(t, goldenPath, gotTrans)
 				return
 			}
 
@@ -85,16 +79,29 @@ func TestGolden(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if string(gotJSON) != string(wantJSON) {
-				if *update {
-					if err := os.WriteFile(goldenPath, gotJSON, 0644); err != nil {
-						t.Fatal(err)
-					}
-					t.Logf("updated golden file: %s", goldenPath)
-				} else {
-					t.Errorf("output mismatch for %s. Run with -update to update golden files.", entry.Name())
-				}
+			var wantTrans []model.Transaction
+			if err := json.Unmarshal(wantJSON, &wantTrans); err != nil {
+				t.Fatalf("failed to unmarshal golden file: %v", err)
+			}
+
+			if *update {
+				writeGolden(t, goldenPath, gotTrans)
+			} else if !reflect.DeepEqual(gotTrans, wantTrans) {
+				t.Errorf("output mismatch for %s. Run with -update to update golden files.", entry.Name())
 			}
 		})
 	}
+}
+
+func writeGolden(t *testing.T, path string, trans []model.Transaction) {
+	data, err := json.MarshalIndent(trans, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Append newline to satisfy linter
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("wrote golden file: %s", path)
 }
