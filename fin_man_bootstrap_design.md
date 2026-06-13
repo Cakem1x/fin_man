@@ -20,17 +20,7 @@ fin_man/
 │   ├── finance.example.toml
 │   └── categories.example.toml
 ├── cmd/
-│   ├── fin-import/
-│   │   └── main.go
-│   ├── fin-review/
-│   │   └── main.go
-│   ├── fin-query/
-│   │   └── main.go
-│   ├── fin-report/
-│   │   └── main.go
-│   ├── fin-rules/
-│   │   └── main.go
-│   └── fin-db/
+│   └── fin/
 │       └── main.go
 ├── internal/
 │   ├── config/
@@ -222,46 +212,40 @@ name = "rent"
 
 ---
 
-# CLI Executables
+# CLI Executable
 
 # Philosophy
 
-Each executable should:
-- do one thing well
-- compose with pipes/scripts
-- remain independently understandable
+The `fin` executable is the primary interface for all operations. It uses subcommands to organize functionality while sharing a common configuration and database connection logic.
 
-Avoid giant shared command hierarchies.
+- Each subcommand should do one thing well.
+- Subcommands should compose via pipes where appropriate.
+- Maintain a consistent flag and error reporting style.
 
 ---
 
-## cmd/fin-import/
+## `fin` Subcommands
+
+### `import-csv`
 
 Purpose:
-- ingest transaction data
+- ingest transaction data from CSV files
 
 Responsibilities:
-- parse CSV
+- parse CSV (using generic or specific implementations)
 - normalize transactions
 - store raw imports
 - deduplicate
 - insert canonical transactions
 
-Should support:
-
+Example:
 ```sh
-fin-import dkb file.csv
-fin-import generic --mapping mapping.toml file.csv
+fin import-csv -c dkb_config.json file.csv
 ```
-
-Should NOT:
-- perform interactive categorization
-- generate reports
-- sync files
 
 ---
 
-## cmd/fin-review/
+### `review`
 
 Purpose:
 - human enrichment workflow
@@ -274,40 +258,26 @@ Responsibilities:
 - tag transactions
 
 Should use:
-- terminal UI
+- terminal UI (Bubble Tea)
 - keyboard-driven interactions
 
-Should NOT:
-- import CSVs
-- manage backups
-
 ---
 
-## cmd/fin-query/
+### `query`
 
 Purpose:
-- ad-hoc querying
+- ad-hoc querying and extraction
 
 Example usage:
-
 ```sh
-fin-query category groceries
-fin-query merchant amazon
-fin-query tag reimbursable
+fin query category groceries
+fin query merchant amazon
+fin query --json
 ```
-
-Should support:
-- filtering
-- sorting
-- JSON output
-- CSV output
-
-Should NOT:
-- mutate transaction data by default
 
 ---
 
-## cmd/fin-report/
+### `report`
 
 Purpose:
 - aggregate analytics
@@ -317,39 +287,22 @@ Reports:
 - merchant analysis
 - category trends
 - account balances
-- cashflow
-
-Output formats:
-- terminal tables
-- CSV
-- HTML (later)
-
-Should NOT:
-- modify transaction metadata
 
 ---
 
-## cmd/fin-rules/
+### `rules`
 
 Purpose:
-- manage categorization rules
+- manage and test categorization rules
 
 Responsibilities:
 - list rules
-- test rules
+- test rules against specific transactions
 - reorder priorities
-- enable/disable rules
-
-Should support:
-
-```sh
-fin-rules list
-fin-rules test transaction-id
-```
 
 ---
 
-## cmd/fin-db/
+### `db`
 
 Purpose:
 - low-level database operations
@@ -358,10 +311,7 @@ Responsibilities:
 - migrations
 - integrity checks
 - vacuum
-- backup helpers
-
-Should NOT:
-- expose raw SQL shell functionality initially
+- backup/restore helpers
 
 ---
 

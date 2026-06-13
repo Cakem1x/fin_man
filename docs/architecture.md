@@ -24,12 +24,13 @@
 
 ## Main Components
 
-- fin-import
-- fin-review
-- fin-query
-- fin-report
-- fin-rules
-- fin-db
+- `fin` (Unified CLI)
+  - `import-csv`
+  - `review`
+  - `query`
+  - `report`
+  - `rules`
+  - `db`
 
 ## Non-Goals
 
