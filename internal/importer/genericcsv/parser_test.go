@@ -2,7 +2,9 @@ package genericcsv_test
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +20,7 @@ func TestGolden(t *testing.T) {
 	testDataDir := filepath.Join("testdata", "dkb")
 	entries, err := os.ReadDir(testDataDir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			t.Skip("testdata not found")
 		}
 		t.Fatal(err)
@@ -70,7 +72,7 @@ func TestGolden(t *testing.T) {
 			}
 
 			// If golden file doesn't exist, create it (bootstrap)
-			if _, err := os.Stat(goldenPath); os.IsNotExist(err) {
+			if _, err := os.Stat(goldenPath); errors.Is(err, fs.ErrNotExist) {
 				if err := os.WriteFile(goldenPath, gotJSON, 0644); err != nil {
 					t.Fatal(err)
 				}
