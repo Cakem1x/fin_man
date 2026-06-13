@@ -32,10 +32,14 @@
   - `rules`
   - `db`
 
-## Non-Goals
+## Execution Model (Separation of Concerns)
 
-- web app
-- cloud sync platform
-- mobile app
-- custom encryption
-- double-entry accounting initially
+There is a strict separation between the **Codebase** and the **User Workspace**:
+
+1. **Codebase (`fin_man/`)**: Stateless logic, schema definitions, and dev environment.
+2. **User Workspace (`~/finance/`)**: Stateful private data, configurations, and database.
+
+The `fin` CLI is invoked by pointing it at a workspace configuration:
+```sh
+fin --config path/to/workspace/finance.toml <subcommand>
+```

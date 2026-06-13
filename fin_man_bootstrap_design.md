@@ -4,6 +4,32 @@ This document restructures the architecture proposal into concrete repository fi
 
 ---
 
+# User Workspace Architecture
+
+The **User Workspace** is the directory where personal financial data is stored. It is decoupled from the **Code Repository** to ensure privacy, portability, and ease of backup.
+
+## Workspace Layout
+
+```text
+my-finances/           # Root of the personal workspace (Encrypted)
+├── finance.toml       # User-specific application configuration
+├── categories.toml    # Personal category definitions
+├── rules.toml         # Custom categorization logic
+├── data/
+│   └── finance.db     # SQLite database (contains facts and metadata)
+├── archives/          # Immutable storage of raw source files
+│   └── dkb/
+│       └── 2024-06-set1.csv
+└── exports/           # Generated reports and exports
+```
+
+## Configuration Separation
+
+- **Repository Templates**: `config/*.example.toml` in the codebase serve as blueprints.
+- **User Workspace Config**: `finance.toml` in the workspace overrides defaults and specifies paths relative to the workspace root.
+
+---
+
 # Repository Layout
 
 ```text
