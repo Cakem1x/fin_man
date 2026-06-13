@@ -24,6 +24,12 @@
               files = "\\.go$";
               pass_filenames = false;
             };
+
+            # Standard hooks
+            trim-trailing-whitespace.enable = true;
+            end-of-file-fixer.enable = true;
+            check-yaml.enable = true;
+            check-added-large-files.enable = true;
           };
         };
       in
