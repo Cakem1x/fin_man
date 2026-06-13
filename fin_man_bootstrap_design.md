@@ -27,10 +27,7 @@ fin_man/
 │   ├── db/
 │   ├── model/
 │   ├── importer/
-│   │   ├── genericcsv/
-│   │   ├── dkb/
-│   │   ├── ing/
-│   │   └── revolut/
+│   │   └── genericcsv/
 │   ├── normalize/
 │   ├── dedup/
 │   ├── categorize/
