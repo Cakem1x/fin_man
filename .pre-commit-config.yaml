@@ -1,6 +1,17 @@
-# See https://pre-commit.com for more information
-# See https://pre-commit.com/hooks.html for more hooks
+# This file is now secondary to flake.nix if using devenv,
+# but can be kept for environments not using nix.
+# To ensure parity, hooks here should also use local just calls.
+
 repos:
+  - repo: local
+    hooks:
+      - id: just-lint
+        name: just-lint
+        entry: just lint
+        language: system
+        files: \.go$
+        pass_filenames: false
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
@@ -8,9 +19,3 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
-
-  - repo: https://github.com/dnephin/pre-commit-golang
-    rev: v0.5.1
-    hooks:
-      - id: go-fmt
-      - id: golangci-lint
