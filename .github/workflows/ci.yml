@@ -15,8 +15,11 @@ jobs:
       - name: Install Nix
         uses: cachix/install-nix-action@v27
 
-      - name: Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v7
+      - name: Nix Cache
+        uses: nix-community/cache-nix-action@v5
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
 
       - name: Lint
         run: nix develop --command just lint
