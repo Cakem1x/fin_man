@@ -10,14 +10,14 @@ jobs:
   build-test-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: cachix/install-nix-action@v31
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Lint
-        run: nix develop --command just lint
+      - name: Check flake and lint
+        run: nix flake check --no-build
 
       - name: Build
         run: nix develop --command just build

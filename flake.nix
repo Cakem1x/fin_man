@@ -13,6 +13,10 @@
         pkgs = import nixpkgs {
           inherit system;
         };
+
+        # Main application package
+        fin_man = pkgs.callPackage ./nix/package.nix { };
+
         pre-commit-check = pre-commit-hooks.lib.${system}.run {
           src = ./.;
           hooks = {
@@ -20,7 +24,16 @@
             just-lint = {
               enable = true;
               name = "just-lint";
-              entry = "just lint";
+              entry = let
+                path = pkgs.lib.makeBinPath [ pkgs.just pkgs.golangci-lint pkgs.go pkgs.bash pkgs.coreutils ];
+              in
+              "${pkgs.bash}/bin/sh -c '
+                export PATH=${path}:$PATH
+                export GOCACHE=$TMPDIR/gocache
+                ln -snf ${fin_man.goModules} vendor
+                export GOFLAGS=-mod=vendor
+                just lint
+              '";
               files = "\\.go$";
               pass_filenames = false;
             };
@@ -34,31 +47,38 @@
         };
       in
       {
+        packages = {
+          inherit fin_man;
+          default = fin_man;
+        };
+
         checks = {
           inherit pre-commit-check;
         };
 
         devShells.default = pkgs.mkShell {
           inherit (pre-commit-check) shellHook;
-          buildInputs = pre-commit-check.enabledPackages;
+
+          inputsFrom = [ fin_man ];
 
           packages = with pkgs; [
-            # Go toolchain
+            # Development tools
             delve
-            go
             golangci-lint
             gopls
             gotools
 
             # Database tools
-            goose # db migration manager
-            sqlc # SQL/codegen
+            goose
+            sqlc
             sqlite
 
-            # misc tools
+            # Task runner & misc
             just
             git
           ];
+
+          buildInputs = pre-commit-check.enabledPackages;
         };
       });
 }
