@@ -71,7 +71,6 @@
             golangci-lint
             gopls
             gotools
-
             antigravity-cli
 
             # Database tools
@@ -82,6 +81,9 @@
             # Task runner & misc
             just
             git
+
+            # encrypt
+            gocryptfs
           ];
 
           buildInputs = pre-commit-check.enabledPackages;
