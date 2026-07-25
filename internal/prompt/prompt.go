@@ -51,3 +51,19 @@ func ReadNewPassword(title, confirmTitle string) (string, error) {
 	}
 	return password, nil
 }
+
+// Confirm prompts the user with a yes/no question.
+func Confirm(title string) (bool, error) {
+	var response bool
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title(title).
+				Value(&response),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return false, err
+	}
+	return response, nil
+}

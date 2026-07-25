@@ -7,6 +7,12 @@ WIP.
 
 ## Development
 
+### Justfile
+You can use the justfile to run common tasks during development, e.g. `just build`.
+If you don't have just installed, it's still useful to look of stuff.
+
+Run the linter before committing.
+
 ### Nix: Update vendor hash
 When updating Go dependencies, you must update the `vendorHash` in `nix/package.nix`:
 1. Change `vendorHash = ""` in `nix/package.nix`.
