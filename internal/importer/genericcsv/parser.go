@@ -78,6 +78,7 @@ func (imp *Importer) Import(r io.Reader) ([]model.Transaction, error) {
 	return results, nil
 }
 
+
 func (imp *Importer) mapRecord(record []string) (model.Transaction, error) {
 	// Utility to get column safely
 	getCol := func(idx int) string {

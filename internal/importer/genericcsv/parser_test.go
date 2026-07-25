@@ -18,9 +18,8 @@ import (
 var update = flag.Bool("update", false, "update golden files")
 
 func TestGolden(t *testing.T) {
-	// Look for all .csv files in testdata/dkb
-	testDataDir := filepath.Join("testdata", "dkb")
-	entries, err := os.ReadDir(testDataDir)
+	testDataDir := "testdata"
+	bankEntries, err := os.ReadDir(testDataDir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			t.Skip("testdata not found")
@@ -28,66 +27,75 @@ func TestGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".csv") {
+	for _, bankEntry := range bankEntries {
+		if !bankEntry.IsDir() {
 			continue
 		}
 
-		t.Run(entry.Name(), func(t *testing.T) {
-			csvPath := filepath.Join(testDataDir, entry.Name())
-			goldenPath := csvPath + ".golden.json"
+		bankName := bankEntry.Name()
+		bankDir := filepath.Join(testDataDir, bankName)
 
-			// We need a way to tell the importer what the config is for this specific file.
-			// For now, let's assume a default config or look for a .config.json
-			cfg := genericcsv.Config{
-				HasHeader:  true,
-				DateCol:    0,
-				DateFormat: "2006-01-02", // placeholder
-				PayeeCol:   1,
-				AmountCol:  2,
-				Comma:      ',',
-			}
+		entries, err := os.ReadDir(bankDir)
+		if err != nil {
+			t.Fatalf("failed reading dir %s: %v", bankDir, err)
+		}
 
-			// Try to load custom config if exists
-			configPath := csvPath + ".config.json"
-			if data, err := os.ReadFile(configPath); err == nil {
-				if err := json.Unmarshal(data, &cfg); err != nil {
-					t.Fatalf("failed to unmarshal config: %v", err)
+		defaultCfg, defaultCfgFound := genericcsv.GetBuiltinConfig(bankName)
+
+		t.Run(bankName, func(t *testing.T) {
+			for _, entry := range entries {
+				if !strings.HasSuffix(entry.Name(), ".csv") {
+					continue
 				}
-			}
 
-			f, err := os.Open(csvPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = f.Close() }()
+				t.Run(entry.Name(), func(t *testing.T) {
+					csvPath := filepath.Join(bankDir, entry.Name())
+					goldenPath := csvPath + ".golden.json"
 
-			imp := genericcsv.New(cfg)
-			gotTrans, err := imp.Import(f)
-			if err != nil {
-				t.Fatalf("import failed: %v", err)
-			}
+					cfg := defaultCfg
+					configPath := csvPath + ".config.json"
+					if data, err := os.ReadFile(configPath); err == nil {
+						if err := json.Unmarshal(data, &cfg); err != nil {
+							t.Fatalf("failed to unmarshal config %s: %v", configPath, err)
+						}
+					} else if !defaultCfgFound {
+						t.Fatalf("no builtin config for bank %q and no custom config %s found", bankName, configPath)
+					}
 
-			// If golden file doesn't exist, create it (bootstrap)
-			if _, err := os.Stat(goldenPath); errors.Is(err, fs.ErrNotExist) {
-				writeGolden(t, goldenPath, gotTrans)
-				return
-			}
+					f, err := os.Open(csvPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer func() { _ = f.Close() }()
 
-			wantJSON, err := os.ReadFile(goldenPath)
-			if err != nil {
-				t.Fatal(err)
-			}
+					imp := genericcsv.New(cfg)
+					gotTrans, err := imp.Import(f)
+					if err != nil {
+						t.Fatalf("import failed: %v", err)
+					}
 
-			var wantTrans []model.Transaction
-			if err := json.Unmarshal(wantJSON, &wantTrans); err != nil {
-				t.Fatalf("failed to unmarshal golden file: %v", err)
-			}
+					// If golden file doesn't exist, create it (bootstrap)
+					if _, err := os.Stat(goldenPath); errors.Is(err, fs.ErrNotExist) {
+						writeGolden(t, goldenPath, gotTrans)
+						return
+					}
 
-			if *update {
-				writeGolden(t, goldenPath, gotTrans)
-			} else if !reflect.DeepEqual(gotTrans, wantTrans) {
-				t.Errorf("output mismatch for %s. Run with -update to update golden files.", entry.Name())
+					wantJSON, err := os.ReadFile(goldenPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					var wantTrans []model.Transaction
+					if err := json.Unmarshal(wantJSON, &wantTrans); err != nil {
+						t.Fatalf("failed to unmarshal golden file: %v", err)
+					}
+
+					if *update {
+						writeGolden(t, goldenPath, gotTrans)
+					} else if !reflect.DeepEqual(gotTrans, wantTrans) {
+						t.Errorf("output mismatch for %s/%s. Run with -update to update golden files.", bankName, entry.Name())
+					}
+				})
 			}
 		})
 	}
