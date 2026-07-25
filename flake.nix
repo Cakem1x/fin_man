@@ -12,6 +12,7 @@
       let
         pkgs = import nixpkgs {
           inherit system;
+          config.allowUnfree = true; # antigravity-cli :(
         };
 
         # Main application package
@@ -70,6 +71,8 @@
             golangci-lint
             gopls
             gotools
+
+            antigravity-cli
 
             # Database tools
             goose
