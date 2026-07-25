@@ -13,13 +13,6 @@ Use:
 
 The SQLite database lives inside the mounted encrypted directory.
 
-### Backups
-
-Use:
-
-- restic
-- age
-
 ## Workflow
 
 1. mount encrypted store

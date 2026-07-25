@@ -2,6 +2,8 @@
   lib,
   buildGoModule,
   installShellFiles,
+  makeWrapper,
+  gocryptfs,
 }:
 
 buildGoModule {
@@ -12,7 +14,12 @@ buildGoModule {
 
   subPackages = [ "cmd/fin" ];
 
-  nativeBuildInputs = [ installShellFiles ];
+  nativeBuildInputs = [ installShellFiles makeWrapper ];
+
+  postInstall = ''
+    wrapProgram $out/bin/fin \
+      --prefix PATH : ${lib.makeBinPath [ gocryptfs ]}
+  '';
 
   meta = with lib; {
     description = "Personal finance CLI suite";
