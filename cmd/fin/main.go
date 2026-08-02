@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"flag"
@@ -80,22 +81,20 @@ func handleImportCSV(args []string) {
 		os.Exit(1)
 	}
 
-	var wsDir string
-	if *archiveData {
-		cwd, _ := os.Getwd()
-		var err error
-		wsDir, err = workspace.FindRoot(cwd)
-		if err != nil {
-			log.Fatalf("failed to find workspace for archiving: %v", err)
-		}
-		mgr := workspace.NewManager(wsDir)
-		isOpen, err := mgr.IsOpen()
-		if err != nil {
-			log.Fatalf("failed to check workspace state: %v", err)
-		}
-		if !isOpen {
-			log.Fatalf("workspace must be open to archive data")
-		}
+	cwd, _ := os.Getwd()
+	wsDir, err := workspace.FindRoot(cwd)
+	if err != nil {
+		log.Fatalf("failed to find workspace: %v", err)
+	}
+	mgr := workspace.NewManager(wsDir)
+	isOpen, err := mgr.IsOpen()
+	if err != nil {
+		log.Fatalf("failed to check workspace state: %v", err)
+	}
+	if !isOpen {
+		fmt.Println("Workspace must be opened before importing transactions.")
+		fmt.Println("Please run 'fin workspace open' to open it.")
+		os.Exit(1)
 	}
 
 	csvPath := fs.Arg(0)
@@ -185,13 +184,31 @@ func handleImportCSV(args []string) {
 		}
 	}
 
-	// Output as JSON
-	out, err := json.MarshalIndent(txs, "", "  ")
+	dbPath := filepath.Join(wsDir, "store", "finance.db")
+	sqliteDB, err := db.Open(dbPath)
 	if err != nil {
-		log.Fatalf("failed to marshal results: %v", err)
+		log.Fatalf("failed to open database: %v", err)
 	}
+	defer func() {
+		if err := sqliteDB.Close(); err != nil {
+			log.Printf("failed to close database: %v", err)
+		}
+	}()
 
-	fmt.Println(string(out))
+	ctx := context.Background()
+	inserted, duplicates, err := sqliteDB.InsertTransactions(ctx, txs)
+
+	fmt.Printf("Imported %d new transactions\n", inserted)
+	if len(duplicates) > 0 {
+		fmt.Printf("Skipped %d duplicate transactions:\n", len(duplicates))
+		for _, pair := range duplicates {
+			fmt.Printf("- Existing: %s | %s | %d %s | %s\n", pair.Existing.Date.Format("2006-01-02"), pair.Existing.Payee, pair.Existing.AmountCents, pair.Existing.Currency, pair.Existing.Memo)
+			fmt.Printf("  New:      %s | %s | %d %s | %s\n", pair.New.Date.Format("2006-01-02"), pair.New.Payee, pair.New.AmountCents, pair.New.Currency, pair.New.Memo)
+		}
+		log.Fatalf("import finished with duplicate errors: %v", err)
+	} else if err != nil {
+		log.Fatalf("failed to insert transactions: %v", err)
+	}
 }
 
 func handleWorkspace(args []string) {
