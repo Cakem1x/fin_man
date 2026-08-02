@@ -11,7 +11,6 @@ type ReviewResult struct {
 	Category string
 	Tags     []string
 	Memo     string
-	MakeRule bool
 	Skip     bool
 }
 
@@ -23,7 +22,6 @@ func ReviewTransaction(tx model.Transaction, categories []string, existingTags [
 		selectedTags []string
 		newTags      string
 		memo         = tx.Memo
-		makeRule     bool
 	)
 
 	if tx.CategoryName != nil {
@@ -97,9 +95,6 @@ func ReviewTransaction(tx model.Transaction, categories []string, existingTags [
 				Title("Update Memo").
 				Value(&memo).
 				Description("Modify the existing memo if needed"),
-			huh.NewConfirm().
-				Title("Create a rule for this payee?").
-				Value(&makeRule),
 		),
 	)
 
@@ -128,7 +123,6 @@ func ReviewTransaction(tx model.Transaction, categories []string, existingTags [
 		Category: finalCategory,
 		Tags:     finalTags,
 		Memo:     memo,
-		MakeRule: makeRule,
 		Skip:     finalCategory == "",
 	}, nil
 }
