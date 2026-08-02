@@ -5,13 +5,17 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/Cakem1x/fin_man/internal/db"
+	"github.com/Cakem1x/fin_man/internal/dedup"
 	"github.com/Cakem1x/fin_man/internal/importer/genericcsv"
 	"github.com/Cakem1x/fin_man/internal/prompt"
 	"github.com/Cakem1x/fin_man/internal/workspace"
@@ -64,15 +68,34 @@ func handleImportCSV(args []string) {
 	configDesc := fmt.Sprintf("Path to config JSON file OR builtin config name %v", available)
 	configPath := fs.String("config", "", configDesc)
 	fs.StringVar(configPath, "c", "", configDesc)
+	archiveData := fs.Bool("archive", false, "Archive the input CSV file into the workspace")
 
 	if err := fs.Parse(args); err != nil {
 		log.Fatalf("failed to parse flags: %v", err)
 	}
 
 	if *configPath == "" || fs.NArg() < 1 {
-		fmt.Println("Usage: fin import-csv -config <cfg_or_name> <csv_file>")
+		fmt.Println("Usage: fin import-csv -config <cfg_or_name> [-archive] <csv_file>")
 		fs.PrintDefaults()
 		os.Exit(1)
+	}
+
+	var wsDir string
+	if *archiveData {
+		cwd, _ := os.Getwd()
+		var err error
+		wsDir, err = workspace.FindRoot(cwd)
+		if err != nil {
+			log.Fatalf("failed to find workspace for archiving: %v", err)
+		}
+		mgr := workspace.NewManager(wsDir)
+		isOpen, err := mgr.IsOpen()
+		if err != nil {
+			log.Fatalf("failed to check workspace state: %v", err)
+		}
+		if !isOpen {
+			log.Fatalf("workspace must be open to archive data")
+		}
 	}
 
 	csvPath := fs.Arg(0)
@@ -108,6 +131,58 @@ func handleImportCSV(args []string) {
 	txs, err := imp.Import(f)
 	if err != nil {
 		log.Fatalf("import failed: %v", err)
+	}
+
+	// Generate deterministic IDs for deduplication
+	for i := range txs {
+		txs[i].ID = dedup.GenerateHash(txs[i])
+	}
+
+	var archivedPath string
+	if *archiveData {
+		cfgName := *configPath
+		if filepath.Ext(cfgName) == ".json" {
+			cfgName = strings.TrimSuffix(filepath.Base(cfgName), ".json")
+		}
+
+		destDir := filepath.Join(wsDir, "store", "archives", fmt.Sprintf("csv_%s", cfgName))
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			log.Fatalf("failed to create archive directory: %v", err)
+		}
+
+		destFilename := time.Now().Format("20060102150405_") + filepath.Base(csvPath)
+		destPath := filepath.Join(destDir, destFilename)
+
+		srcFile, err := os.Open(csvPath)
+		if err != nil {
+			log.Fatalf("failed to open input file for archiving: %v", err)
+		}
+		defer func() {
+			if err := srcFile.Close(); err != nil {
+				log.Printf("failed to close src file: %v", err)
+			}
+		}()
+
+		dstFile, err := os.Create(destPath)
+		if err != nil {
+			log.Fatalf("failed to create archive file: %v", err)
+		}
+		defer func() {
+			if err := dstFile.Close(); err != nil {
+				log.Printf("failed to close dst file: %v", err)
+			}
+		}()
+
+		if _, err := io.Copy(dstFile, srcFile); err != nil {
+			log.Fatalf("failed to copy to archive: %v", err)
+		}
+		archivedPath = destPath
+	}
+
+	if archivedPath != "" {
+		for i := range txs {
+			txs[i].ArchiveFilePath = &archivedPath
+		}
 	}
 
 	// Output as JSON
