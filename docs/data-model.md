@@ -6,9 +6,6 @@
 
 Canonical normalized transactions.
 
-### raw_transactions
-
-Immutable imported source payloads.
 
 ### transaction_metadata
 
@@ -24,7 +21,7 @@ Deterministic matching rules.
 
 ## Design Principles
 
-- never mutate raw imports
+- never mutate archived raw import files
 - use stable deduplication hashes
 - enrichment remains separate from facts
 - schema migrations are append-only

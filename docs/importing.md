@@ -13,7 +13,7 @@ Future support:
 
 ## Pipeline
 
-source -> raw import -> normalization -> deduplication -> canonical transaction
+source -> normalization -> deduplication -> canonical transaction (source file archived)
 
 ## Importer Design
 

@@ -257,7 +257,7 @@ Purpose:
 Responsibilities:
 - parse CSV (using generic or specific implementations)
 - normalize transactions
-- store raw imports
+- copy source file to archives
 - deduplicate
 - insert canonical transactions
 
@@ -769,9 +769,8 @@ Future:
 Raw imported data is immutable.
 
 Never mutate:
-- imported CSV payloads
-- imported bank payloads
-- raw transaction rows
+- archived CSV files
+- archived bank payloads
 
 All enrichment is layered on top.
 
