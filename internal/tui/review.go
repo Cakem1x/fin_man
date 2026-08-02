@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 
+	"github.com/Cakem1x/fin_man/internal/categorize"
 	"github.com/Cakem1x/fin_man/internal/model"
 	"github.com/charmbracelet/huh"
 )
@@ -15,7 +16,7 @@ type ReviewResult struct {
 }
 
 // ReviewTransaction presents a form to the user to enrich a transaction.
-func ReviewTransaction(tx model.Transaction, categories []string, existingTags []string) (*ReviewResult, error) {
+func ReviewTransaction(tx model.Transaction, categories []string, existingTags []string, suggestion *categorize.Estimation) (*ReviewResult, error) {
 	var (
 		category     string
 		newCategory  string
@@ -24,11 +25,8 @@ func ReviewTransaction(tx model.Transaction, categories []string, existingTags [
 		memo         = tx.Memo
 	)
 
-	if tx.CategoryName != nil {
-		category = *tx.CategoryName
-	}
-	for _, t := range tx.Tags {
-		selectedTags = append(selectedTags, t.Name)
+	if suggestion != nil {
+		category = suggestion.CategoryName
 	}
 
 	catOptions := []huh.Option[string]{
@@ -39,9 +37,7 @@ func ReviewTransaction(tx model.Transaction, categories []string, existingTags [
 		catOptions = append(catOptions, huh.NewOption(c, c))
 	}
 
-	tagOptions := []huh.Option[string]{
-		huh.NewOption("[Add New Tags...]", "__add_new__"),
-	}
+	var tagOptions []huh.Option[string]
 	for _, t := range existingTags { // Assume existingTags is passed as []string
 		tagOptions = append(tagOptions, huh.NewOption(t, t))
 	}
@@ -77,19 +73,10 @@ func ReviewTransaction(tx model.Transaction, categories []string, existingTags [
 				Options(tagOptions...).
 				Value(&selectedTags).
 				Description("Type to fuzzy filter. Select space to toggle."),
-		),
-		huh.NewGroup(
 			huh.NewInput().
-				Title("New Tags (comma separated)").
+				Title("New Tag (optional)").
 				Value(&newTags),
-		).WithHideFunc(func() bool {
-			for _, t := range selectedTags {
-				if t == "__add_new__" {
-					return false
-				}
-			}
-			return true
-		}),
+		),
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Update Memo").
@@ -110,11 +97,7 @@ func ReviewTransaction(tx model.Transaction, categories []string, existingTags [
 	}
 
 	finalTags := []string{}
-	for _, t := range selectedTags {
-		if t != "__add_new__" {
-			finalTags = append(finalTags, t)
-		}
-	}
+	finalTags = append(finalTags, selectedTags...)
 	if newTags != "" {
 		finalTags = append(finalTags, newTags)
 	}

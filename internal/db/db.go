@@ -156,6 +156,77 @@ func (db *DB) GetAllTags(ctx context.Context) ([]model.Tag, error) {
 	return tags, rows.Err()
 }
 
+// EnrichTransaction updates a transaction with a category, tags, and memo.
+// It creates the category and tags if they do not exist.
+func (db *DB) EnrichTransaction(ctx context.Context, txID string, categoryName string, tagNames []string, memo string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var categoryID *string
+	if categoryName != "" {
+		// Insert category if it doesn't exist (assuming UUID or we can just use the name as ID to be simple).
+		// Wait, the migration specifies `id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL`.
+		// Let's use the name as the ID to avoid needing a UUID generator, or if we use UUID, we'd need google/uuid.
+		// Since we don't know if google/uuid is used, using the name as the ID is the simplest for categories.
+		// Let's check model.go to see if ID is defined. Actually, just using Name as ID for now, or generating one.
+		// Let's use name as ID for simplicity and deduplication, but we'll do lowercase or something.
+		// Actually, let's just use the name as the ID directly.
+		catID := categoryName
+		_, err := tx.ExecContext(ctx, "INSERT INTO categories (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING", catID, categoryName)
+		if err != nil {
+			return fmt.Errorf("failed to upsert category: %w", err)
+		}
+
+		err = tx.QueryRowContext(ctx, "SELECT id FROM categories WHERE name = ?", categoryName).Scan(&catID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch category id: %w", err)
+		}
+		categoryID = &catID
+	}
+
+	// Update the transaction
+	_, err = tx.ExecContext(ctx, "UPDATE transactions SET category_id = ?, memo = ? WHERE id = ?", categoryID, memo, txID)
+	if err != nil {
+		return fmt.Errorf("failed to update transaction: %w", err)
+	}
+
+	// Clear existing tags for the transaction
+	_, err = tx.ExecContext(ctx, "DELETE FROM transaction_tags WHERE transaction_id = ?", txID)
+	if err != nil {
+		return fmt.Errorf("failed to clear transaction tags: %w", err)
+	}
+
+	// Upsert and link tags
+	for _, tagName := range tagNames {
+		if tagName == "" {
+			continue
+		}
+		tagID := tagName
+		_, err := tx.ExecContext(ctx, "INSERT INTO tags (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING", tagID, tagName)
+		if err != nil {
+			return fmt.Errorf("failed to upsert tag %q: %w", tagName, err)
+		}
+
+		err = tx.QueryRowContext(ctx, "SELECT id FROM tags WHERE name = ?", tagName).Scan(&tagID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch tag id for %q: %w", tagName, err)
+		}
+
+		_, err = tx.ExecContext(ctx, "INSERT INTO transaction_tags (transaction_id, tag_id) VALUES (?, ?)", txID, tagID)
+		if err != nil {
+			return fmt.Errorf("failed to link tag %q: %w", tagName, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit tx: %w", err)
+	}
+	return nil
+}
+
 // GetAllTransactions fetches all transactions, both categorized and uncategorized.
 func (db *DB) GetAllTransactions(ctx context.Context) ([]model.Transaction, error) {
 	rows, err := db.QueryContext(ctx, `
@@ -178,6 +249,31 @@ func (db *DB) GetAllTransactions(ctx context.Context) ([]model.Transaction, erro
 
 		// Note: We don't hydrate tags here yet for simplicity in this draft,
 		// but we would typically run a second query or JOIN to fetch tags.
+
+		txs = append(txs, t)
+	}
+	return txs, rows.Err()
+}
+
+// GetCategorizedTransactions fetches transactions that have a category assigned.
+func (db *DB) GetCategorizedTransactions(ctx context.Context) ([]model.Transaction, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, c.name
+		FROM transactions t
+		JOIN categories c ON t.category_id = c.id
+		ORDER BY t.date ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query failed: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var txs []model.Transaction
+	for rows.Next() {
+		var t model.Transaction
+		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.CategoryName); err != nil {
+			return nil, fmt.Errorf("scan failed: %w", err)
+		}
 
 		txs = append(txs, t)
 	}

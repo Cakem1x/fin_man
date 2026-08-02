@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Cakem1x/fin_man/internal/categorize"
 	"github.com/Cakem1x/fin_man/internal/db"
 	"github.com/Cakem1x/fin_man/internal/model"
 	"github.com/Cakem1x/fin_man/internal/tui"
@@ -85,8 +86,15 @@ var reviewCmd = &cobra.Command{
 			return
 		}
 
+		categorizedTxs, err := sqliteDB.GetCategorizedTransactions(ctx)
+		if err != nil {
+			log.Printf("warning: failed to fetch categorized transactions for estimator: %v", err)
+		}
+		estimator := categorize.NewEstimator(categorizedTxs)
+
 		for _, tx := range txs {
-			res, err := tui.ReviewTransaction(tx, catNames, tagNames)
+			suggestion := estimator.Estimate(tx)
+			res, err := tui.ReviewTransaction(tx, catNames, tagNames, suggestion)
 			if err != nil {
 				// User cancelled or error occurred
 				fmt.Printf("\nReview aborted: %v\n", err)
@@ -98,8 +106,41 @@ var reviewCmd = &cobra.Command{
 				continue
 			}
 
-			// TODO: Save the result to the DB (categories, tags, memo, rules)
-			fmt.Printf("Categorized as %s with tags %v. (Save to DB not implemented yet)\n", res.Category, res.Tags)
+			err = sqliteDB.EnrichTransaction(ctx, tx.ID, res.Category, res.Tags, res.Memo)
+			if err != nil {
+				log.Printf("failed to save transaction %s: %v", tx.ID, err)
+			} else {
+				fmt.Printf("Successfully saved: %s categorized as %q with tags %v\n", tx.ID, res.Category, res.Tags)
+
+				if res.Category != "" {
+					foundCat := false
+					for _, c := range catNames {
+						if c == res.Category {
+							foundCat = true
+							break
+						}
+					}
+					if !foundCat {
+						catNames = append(catNames, res.Category)
+					}
+				}
+
+				for _, t := range res.Tags {
+					if t == "" {
+						continue
+					}
+					foundTag := false
+					for _, existing := range tagNames {
+						if existing == t {
+							foundTag = true
+							break
+						}
+					}
+					if !foundTag {
+						tagNames = append(tagNames, t)
+					}
+				}
+			}
 		}
 	},
 }
