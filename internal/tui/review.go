@@ -26,6 +26,13 @@ func ReviewTransaction(tx model.Transaction, categories []string, existingTags [
 		makeRule     bool
 	)
 
+	if tx.CategoryName != nil {
+		category = *tx.CategoryName
+	}
+	for _, t := range tx.Tags {
+		selectedTags = append(selectedTags, t.Name)
+	}
+
 	catOptions := []huh.Option[string]{
 		huh.NewOption("Skip (Leave Uncategorized)", ""),
 		huh.NewOption("[Add New Category...]", "__add_new__"),
