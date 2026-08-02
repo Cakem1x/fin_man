@@ -11,4 +11,7 @@ type Transaction struct {
 	Currency        string
 	Memo            string
 	ArchiveFilePath *string `json:"archive_file_path,omitempty"`
+	CategoryID      *string // Foreign key to Category
+	CategoryName    *string // Hydrated for convenience
+	Tags            []Tag   // Hydrated many-to-many relationship
 }

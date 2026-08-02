@@ -18,3 +18,8 @@ When updating Go dependencies, you must update the `vendorHash` in `nix/package.
 1. Change `vendorHash = ""` in `nix/package.nix`.
 2. Run `nix build .#fin_man` which will fail and print the correct hash.
 3. Copy the `got: sha256-...` hash from the error and paste it as the new `vendorHash`.
+
+## Concepts: Categories vs. Tags
+When enriching transactions, `fin_man` distinguishes between Categories and Tags:
+- **Category**: A primary, mutually exclusive classification for budgeting (e.g., `Housing`, `Food`, `Transportation`). A transaction should have exactly **one** category.
+- **Tags**: Flexible, cross-category labels used for specific tracking (e.g., `#vacation-2024`, `#tax-deductible`, `#business-expense`). A transaction can have **multiple** tags or none.

@@ -10,7 +10,7 @@ buildGoModule {
   pname = "fin_man";
   version = "0.1.0";
   src = ../.; # Root of the repository
-  vendorHash = "sha256-Z2/VSaWnPKB2QBzBQXGAKg93fS3qmHbrkuf4tqi9eQs=";
+  vendorHash = "sha256-DgcmFVUo7mLmbz1DKy6oUTmPPT0ZbTxkXBa19ingdkQ=";
 
   subPackages = [ "cmd/fin" ];
 
@@ -19,6 +19,11 @@ buildGoModule {
   postInstall = ''
     wrapProgram $out/bin/fin \
       --prefix PATH : ${lib.makeBinPath [ gocryptfs ]}
+
+    installShellCompletion --cmd fin \
+      --bash <($out/bin/fin completion bash) \
+      --zsh <($out/bin/fin completion zsh) \
+      --fish <($out/bin/fin completion fish)
   '';
 
   meta = with lib; {
