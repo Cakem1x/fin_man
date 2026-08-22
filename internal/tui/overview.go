@@ -13,9 +13,7 @@ import (
 	"github.com/Cakem1x/fin_man/internal/model"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/table"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -141,19 +139,10 @@ type OverviewModel struct {
 	// Review form overlay
 	reviewingTx     bool
 	reviewingID     string
-	reviewingTxData model.Transaction
 	categories      []string
 	tags            []string
 	estimator       *categorize.Estimator
-	reviewMemoForm  *huh.Form
-	reviewCatForm   *huh.Form
-	reviewTagForm   *huh.Form
-	reviewPane      int
-	reviewState     *ReviewFormState
-
-	addingNew     bool
-	addingNewType string // "category" or "tags"
-	newInput      textinput.Model
+	reviewModel     *ReviewModel
 
 	width  int
 	height int
@@ -197,11 +186,6 @@ func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB) OverviewM
 	categorizedTxs, _ := dbConn.GetCategorizedTransactions(ctx)
 	estimator := categorize.NewEstimator(categorizedTxs)
 
-	ti := textinput.New()
-	ti.Placeholder = ""
-	ti.CharLimit = 100
-	ti.Width = 40
-
 	m := OverviewModel{
 		dbConn:       dbConn,
 		transactions: transactions,
@@ -212,7 +196,6 @@ func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB) OverviewM
 		categories:   catNames,
 		tags:         tagNames,
 		estimator:    estimator,
-		newInput:     ti,
 	}
 	m.updateData()
 	return m
@@ -224,53 +207,19 @@ func (m *OverviewModel) Init() tea.Cmd {
 
 func (m *OverviewModel) openReviewForm(tx model.Transaction) tea.Cmd {
 	suggestion := m.estimator.Estimate(tx)
-	state := &ReviewFormState{}
-	m.reviewState = state
-	memoF, catF, tagF := BuildReviewForms(tx, m.categories, m.tags, suggestion, state)
-	m.reviewMemoForm = memoF
-	m.reviewCatForm = catF
-	m.reviewTagForm = tagF
+
+	rm := NewReviewModel(tx, m.categories, m.tags, suggestion, m.width, m.height)
+	m.reviewModel = &rm
 	m.reviewingID = tx.ID
-	m.reviewingTxData = tx
 	m.reviewingTx = true
-	m.reviewPane = 0
 
-	m.updateReviewFocus()
-
-	return tea.Batch(m.reviewMemoForm.Init(), m.reviewCatForm.Init(), m.reviewTagForm.Init())
+	return m.reviewModel.Init()
 }
 
-func focusForm(f *huh.Form, focused bool) {
-	if f == nil {
-		return
-	}
-	field := f.GetFocusedField()
-	if field != nil {
-		if focused {
-			field.Focus()
-		} else {
-			field.Blur()
-		}
-	}
-}
 
-func (m *OverviewModel) updateReviewFocus() {
-	focusForm(m.reviewMemoForm, false)
-	focusForm(m.reviewCatForm, false)
-	focusForm(m.reviewTagForm, false)
 
-	switch m.reviewPane {
-	case 0:
-		focusForm(m.reviewMemoForm, true)
-	case 1:
-		focusForm(m.reviewCatForm, true)
-	case 2:
-		focusForm(m.reviewTagForm, true)
-	}
-}
-
-func (m *OverviewModel) saveReview(markReviewed bool) (tea.Model, tea.Cmd) {
-	res := ExtractReviewResult(m.reviewState)
+func (m *OverviewModel) saveReview(res *ReviewResult) (tea.Model, tea.Cmd) {
+	markReviewed := res.Action == ActionSaveReviewed
 	ctx := context.Background()
 	err := m.dbConn.EnrichTransaction(ctx, m.reviewingID, res.Category, res.Tags, res.Memo, markReviewed)
 	if err != nil {
@@ -323,6 +272,12 @@ func (m *OverviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case ReviewFinishedMsg:
+		if msg.Result.Action == ActionDiscard {
+			m.reviewingTx = false
+			return m, nil
+		}
+		return m.saveReview(msg.Result)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -347,6 +302,13 @@ func (m *OverviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cols[4].Width = 15
 			cols[1].Width = tableWidth - borderH - 50 - 4
 			m.txTable.SetColumns(cols)
+		}
+
+		if m.reviewingTx {
+			var newModel tea.Model
+			newModel, cmd = m.reviewModel.Update(msg)
+			m.reviewModel = newModel.(*ReviewModel)
+			cmds = append(cmds, cmd)
 		}
 
 	case tea.KeyMsg:
@@ -419,114 +381,10 @@ func (m *OverviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	} else {
-		if m.addingNew {
-			if msg, ok := msg.(tea.KeyMsg); ok {
-				switch msg.String() {
-				case "esc":
-					m.addingNew = false
-					m.newInput.Blur()
-					return m, nil
-				case "enter":
-					val := strings.TrimSpace(m.newInput.Value())
-					var batchCmds []tea.Cmd
-					if val != "" {
-						switch m.addingNewType {
-						case "category":
-							m.categories = append(m.categories, val)
-							m.reviewState.Category = val
-							m.reviewMemoForm, m.reviewCatForm, m.reviewTagForm = BuildReviewForms(m.reviewingTxData, m.categories, m.tags, m.estimator.Estimate(m.reviewingTxData), m.reviewState)
-							m.updateReviewFocus()
-							batchCmds = append(batchCmds, m.reviewMemoForm.Init(), m.reviewCatForm.Init(), m.reviewTagForm.Init())
-						case "tags":
-							m.tags = append(m.tags, val)
-							m.reviewState.SelectedTags = append(m.reviewState.SelectedTags, val)
-							m.reviewMemoForm, m.reviewCatForm, m.reviewTagForm = BuildReviewForms(m.reviewingTxData, m.categories, m.tags, m.estimator.Estimate(m.reviewingTxData), m.reviewState)
-							m.updateReviewFocus()
-							batchCmds = append(batchCmds, m.reviewMemoForm.Init(), m.reviewCatForm.Init(), m.reviewTagForm.Init())
-						}
-					}
-					m.addingNew = false
-					m.newInput.Blur()
-					return m, tea.Batch(batchCmds...)
-				}
-			}
-			m.newInput, cmd = m.newInput.Update(msg)
-			cmds = append(cmds, cmd)
-			return m, tea.Batch(cmds...)
-		}
-
-		isFiltering := false
-		var activeForm *huh.Form
-		switch m.reviewPane {
-		case 0:
-			activeForm = m.reviewMemoForm
-		case 1:
-			activeForm = m.reviewCatForm
-		case 2:
-			activeForm = m.reviewTagForm
-		}
-
-		if activeForm != nil {
-			f := activeForm.GetFocusedField()
-			if sel, ok := f.(*huh.Select[string]); ok {
-				isFiltering = sel.GetFiltering()
-			} else if msel, ok := f.(*huh.MultiSelect[string]); ok {
-				isFiltering = msel.GetFiltering()
-			}
-
-			if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "n" && !isFiltering {
-				if f.GetKey() == "category" {
-					m.addingNew = true
-					m.addingNewType = "category"
-					m.newInput.Placeholder = "New Category Name"
-					m.newInput.Reset()
-					m.newInput.Focus()
-					return m, nil
-				} else if f.GetKey() == "tags" {
-					m.addingNew = true
-					m.addingNewType = "tags"
-					m.newInput.Placeholder = "New Tag Name"
-					m.newInput.Reset()
-					m.newInput.Focus()
-					return m, nil
-				}
-			}
-
-			if msg, ok := msg.(tea.KeyMsg); ok && !isFiltering {
-				switch msg.String() {
-				case "esc":
-					m.reviewingTx = false
-					return m, nil
-				case "ctrl+s":
-					return m.saveReview(false)
-				case "tab":
-					m.reviewPane = (m.reviewPane + 1) % 3
-					m.updateReviewFocus()
-					return m, nil
-				case "shift+tab":
-					m.reviewPane = (m.reviewPane - 1 + 3) % 3
-					m.updateReviewFocus()
-					return m, nil
-				}
-			}
-		}
-
-		var newForm tea.Model
-		newForm, cmd = m.reviewMemoForm.Update(msg)
-		if f, ok := newForm.(*huh.Form); ok { m.reviewMemoForm = f }
+		var newModel tea.Model
+		newModel, cmd = m.reviewModel.Update(msg)
+		m.reviewModel = newModel.(*ReviewModel)
 		cmds = append(cmds, cmd)
-
-		newForm, cmd = m.reviewCatForm.Update(msg)
-		if f, ok := newForm.(*huh.Form); ok { m.reviewCatForm = f }
-		cmds = append(cmds, cmd)
-
-		newForm, cmd = m.reviewTagForm.Update(msg)
-		if f, ok := newForm.(*huh.Form); ok { m.reviewTagForm = f }
-		cmds = append(cmds, cmd)
-
-		if m.reviewMemoForm.State == huh.StateCompleted || m.reviewCatForm.State == huh.StateCompleted || m.reviewTagForm.State == huh.StateCompleted {
-			return m.saveReview(true)
-		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -804,50 +662,7 @@ func (m *OverviewModel) View() string {
 
 		content = lipgloss.JoinVertical(lipgloss.Left, header, panes, help)
 	} else {
-		txView := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("62")).
-			Padding(0, 1).
-			Render(fmt.Sprintf(
-				"Date:   %s\nPayee:  %s\nAmount: %.2f %s\n\n%s",
-				m.reviewingTxData.Date.Format("2006-01-02"),
-				m.reviewingTxData.Payee,
-				float64(m.reviewingTxData.AmountCents)/100.0,
-				m.reviewingTxData.Currency,
-				m.reviewMemoForm.View(),
-			))
-
-		bottomLeft := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("62")).
-			Padding(0, 1).
-			Width(m.width / 2 - 4).
-			Render(m.reviewCatForm.View())
-
-		bottomRight := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("62")).
-			Padding(0, 1).
-			Width(m.width / 2 - 4).
-			Render(m.reviewTagForm.View())
-
-		bottom := lipgloss.JoinHorizontal(lipgloss.Top, bottomLeft, bottomRight)
-		formView := lipgloss.JoinVertical(lipgloss.Left, txView, bottom)
-
-		if m.addingNew {
-			dialog := lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("62")).
-				Padding(1, 2).
-				Render("Enter new " + m.addingNewType + ":\n\n" + m.newInput.View())
-			helpText := "\n[esc] Cancel • [enter] Submit"
-			help = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(helpText)
-			content = lipgloss.JoinVertical(lipgloss.Left, header, formView, dialog, help)
-		} else {
-			helpText := "\n[esc] Discard • [ctrl+s] Save • [enter] Save & Mark Reviewed • [tab] Switch Pane • [/] Fuzzy Filter • [n] New Category/Tag"
-			help = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(helpText)
-			content = lipgloss.JoinVertical(lipgloss.Left, header, formView, help)
-		}
+		content = lipgloss.JoinVertical(lipgloss.Left, header, m.reviewModel.View())
 	}
 
 	return appStyle.Render(content)
