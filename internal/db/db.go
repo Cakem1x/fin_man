@@ -47,7 +47,7 @@ func (db *DB) InsertTransactions(ctx context.Context, txs []model.Transaction) (
 	defer func() { _ = stmt.Close() }()
 
 	selectStmt, err := tx.PrepareContext(ctx, `
-		SELECT id, date, payee, amount_cents, currency, memo, archive_file_path
+		SELECT id, date, payee, amount_cents, currency, memo, archive_file_path, is_reviewed
 		FROM transactions
 		WHERE id = ?
 	`)
@@ -74,7 +74,7 @@ func (db *DB) InsertTransactions(ctx context.Context, txs []model.Transaction) (
 		} else {
 			row := selectStmt.QueryRowContext(ctx, t.ID)
 			var existing model.Transaction
-			err := row.Scan(&existing.ID, &existing.Date, &existing.Payee, &existing.AmountCents, &existing.Currency, &existing.Memo, &existing.ArchiveFilePath)
+			err := row.Scan(&existing.ID, &existing.Date, &existing.Payee, &existing.AmountCents, &existing.Currency, &existing.Memo, &existing.ArchiveFilePath, &existing.IsReviewed)
 			if err != nil {
 				return 0, nil, fmt.Errorf("failed to fetch existing transaction %s: %w", t.ID, err)
 			}
@@ -96,13 +96,14 @@ func (db *DB) InsertTransactions(ctx context.Context, txs []model.Transaction) (
 	return insertedCount, nil, nil
 }
 
-// GetUncategorizedTransactions fetches transactions that have no category assigned.
-func (db *DB) GetUncategorizedTransactions(ctx context.Context) ([]model.Transaction, error) {
+// GetUnreviewedTransactions fetches transactions that have not been reviewed.
+func (db *DB) GetUnreviewedTransactions(ctx context.Context) ([]model.Transaction, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, date, payee, amount_cents, currency, memo, archive_file_path, category_id
-		FROM transactions
-		WHERE category_id IS NULL
-		ORDER BY date ASC
+		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, t.is_reviewed, c.name
+		FROM transactions t
+		LEFT JOIN categories c ON t.category_id = c.id
+		WHERE t.is_reviewed = 0
+		ORDER BY t.date ASC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
@@ -112,7 +113,7 @@ func (db *DB) GetUncategorizedTransactions(ctx context.Context) ([]model.Transac
 	var txs []model.Transaction
 	for rows.Next() {
 		var t model.Transaction
-		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID); err != nil {
+		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.CategoryName); err != nil {
 			return nil, fmt.Errorf("scan failed: %w", err)
 		}
 		txs = append(txs, t)
@@ -158,7 +159,7 @@ func (db *DB) GetAllTags(ctx context.Context) ([]model.Tag, error) {
 
 // EnrichTransaction updates a transaction with a category, tags, and memo.
 // It creates the category and tags if they do not exist.
-func (db *DB) EnrichTransaction(ctx context.Context, txID string, categoryName string, tagNames []string, memo string) error {
+func (db *DB) EnrichTransaction(ctx context.Context, txID string, categoryName string, tagNames []string, memo string, isReviewed bool) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin tx: %w", err)
@@ -188,7 +189,7 @@ func (db *DB) EnrichTransaction(ctx context.Context, txID string, categoryName s
 	}
 
 	// Update the transaction
-	_, err = tx.ExecContext(ctx, "UPDATE transactions SET category_id = ?, memo = ? WHERE id = ?", categoryID, memo, txID)
+	_, err = tx.ExecContext(ctx, "UPDATE transactions SET category_id = ?, memo = ?, is_reviewed = ? WHERE id = ?", categoryID, memo, isReviewed, txID)
 	if err != nil {
 		return fmt.Errorf("failed to update transaction: %w", err)
 	}
@@ -230,7 +231,7 @@ func (db *DB) EnrichTransaction(ctx context.Context, txID string, categoryName s
 // GetAllTransactions fetches all transactions, both categorized and uncategorized.
 func (db *DB) GetAllTransactions(ctx context.Context) ([]model.Transaction, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, c.name
+		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, t.is_reviewed, c.name
 		FROM transactions t
 		LEFT JOIN categories c ON t.category_id = c.id
 		ORDER BY t.date ASC
@@ -243,7 +244,7 @@ func (db *DB) GetAllTransactions(ctx context.Context) ([]model.Transaction, erro
 	var txs []model.Transaction
 	for rows.Next() {
 		var t model.Transaction
-		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.CategoryName); err != nil {
+		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.CategoryName); err != nil {
 			return nil, fmt.Errorf("scan failed: %w", err)
 		}
 
@@ -258,7 +259,7 @@ func (db *DB) GetAllTransactions(ctx context.Context) ([]model.Transaction, erro
 // GetCategorizedTransactions fetches transactions that have a category assigned.
 func (db *DB) GetCategorizedTransactions(ctx context.Context) ([]model.Transaction, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, c.name
+		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, t.is_reviewed, c.name
 		FROM transactions t
 		JOIN categories c ON t.category_id = c.id
 		ORDER BY t.date ASC
@@ -271,11 +272,38 @@ func (db *DB) GetCategorizedTransactions(ctx context.Context) ([]model.Transacti
 	var txs []model.Transaction
 	for rows.Next() {
 		var t model.Transaction
-		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.CategoryName); err != nil {
+		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.CategoryName); err != nil {
 			return nil, fmt.Errorf("scan failed: %w", err)
 		}
 
 		txs = append(txs, t)
 	}
 	return txs, rows.Err()
+}
+
+// DeleteCategories removes the specified categories from the database.
+func (db *DB) DeleteCategories(ctx context.Context, names []string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.PrepareContext(ctx, "DELETE FROM categories WHERE name = ?")
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, name := range names {
+		if _, err := stmt.ExecContext(ctx, name); err != nil {
+			return fmt.Errorf("failed to delete category %q: %w", name, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit tx: %w", err)
+	}
+
+	return nil
 }

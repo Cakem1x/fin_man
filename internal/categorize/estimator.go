@@ -13,12 +13,24 @@ type Estimation struct {
 	Confidence   float64 // 0.0 to 1.0
 }
 
+type trainedData struct {
+	Tokens       map[string]struct{}
+	CategoryID   string
+	CategoryName string
+}
+
 type Estimator struct {
-	Corpus []model.Transaction
+	memory []trainedData
 }
 
 func NewEstimator(corpus []model.Transaction) *Estimator {
-	return &Estimator{Corpus: corpus}
+	e := &Estimator{
+		memory: make([]trainedData, 0, len(corpus)),
+	}
+	for _, tx := range corpus {
+		e.Learn(tx)
+	}
+	return e
 }
 
 // tokenize cleans the input string, removes non-alphabetical characters,
@@ -57,6 +69,25 @@ func jaccardSimilarity(a, b map[string]struct{}) float64 {
 	return float64(intersection) / float64(union)
 }
 
+// Learn adds a newly reviewed transaction to the model's memory dynamically.
+func (e *Estimator) Learn(tx model.Transaction) {
+	// Only learn from transactions that actually have a category
+	if tx.CategoryID == nil {
+		return
+	}
+
+	catName := ""
+	if tx.CategoryName != nil {
+		catName = *tx.CategoryName
+	}
+
+	e.memory = append(e.memory, trainedData{
+		Tokens:       tokenize(tx.Payee, tx.Memo),
+		CategoryID:   *tx.CategoryID,
+		CategoryName: catName,
+	})
+}
+
 func (e *Estimator) Estimate(tx model.Transaction) *Estimation {
 	txTokens := tokenize(tx.Payee, tx.Memo)
 
@@ -64,18 +95,13 @@ func (e *Estimator) Estimate(tx model.Transaction) *Estimation {
 	var bestCategoryID string
 	var maxScore = 0.0
 
-	for _, pastTx := range e.Corpus {
-		pastTokens := tokenize(pastTx.Payee, pastTx.Memo)
-		score := jaccardSimilarity(txTokens, pastTokens)
+	for _, pastTx := range e.memory {
+		score := jaccardSimilarity(txTokens, pastTx.Tokens)
 
 		if score > maxScore {
 			maxScore = score
-			if pastTx.CategoryName != nil {
-				bestCategory = *pastTx.CategoryName
-			}
-			if pastTx.CategoryID != nil {
-				bestCategoryID = *pastTx.CategoryID
-			}
+			bestCategory = pastTx.CategoryName
+			bestCategoryID = pastTx.CategoryID
 		}
 	}
 

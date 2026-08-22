@@ -53,7 +53,7 @@ var tuiCmd = &cobra.Command{
 			return fmt.Errorf("failed to fetch transactions: %w", err)
 		}
 
-		m := tui.NewOverviewModel(txs)
+		m := tui.NewOverviewModel(txs, dbConn)
 		p := tea.NewProgram(&m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("error running TUI: %w", err)

@@ -94,3 +94,33 @@ func TestEstimator(t *testing.T) {
 		})
 	}
 }
+
+func TestEstimator_OnlineLearning(t *testing.T) {
+	estimator := NewEstimator(nil)
+
+	// Initial estimation should return nil
+	tx1 := model.Transaction{Payee: "AMAZON WEB SERVICES"}
+	if res := estimator.Estimate(tx1); res != nil {
+		t.Fatalf("Expected nil, got %v", res)
+	}
+
+	// Simulate user categorizing the transaction in the TUI
+	catID := "cat-aws"
+	catName := "Cloud Infrastructure"
+	tx1.CategoryID = &catID
+	tx1.CategoryName = &catName
+
+	// Model learns from the review
+	estimator.Learn(tx1)
+
+	// Subsequent estimation for a similar transaction should now succeed
+	tx2 := model.Transaction{Payee: "AMAZON WEB SRVCS", Memo: "AWS"}
+	res := estimator.Estimate(tx2)
+
+	if res == nil {
+		t.Fatal("Expected an estimation, got nil")
+	}
+	if res.CategoryID != catID {
+		t.Errorf("Expected category %s, got %s", catID, res.CategoryID)
+	}
+}

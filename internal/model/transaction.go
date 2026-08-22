@@ -14,4 +14,5 @@ type Transaction struct {
 	CategoryID      *string // Foreign key to Category
 	CategoryName    *string // Hydrated for convenience
 	Tags            []Tag   // Hydrated many-to-many relationship
+	IsReviewed      bool    // Indicates if the transaction has been reviewed by the user
 }

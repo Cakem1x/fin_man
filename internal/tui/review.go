@@ -2,35 +2,50 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Cakem1x/fin_man/internal/categorize"
 	"github.com/Cakem1x/fin_man/internal/model"
 	"github.com/charmbracelet/huh"
 )
 
+type ReviewAction string
+
+const (
+	ActionDiscard      ReviewAction = "Discard"
+	ActionSave         ReviewAction = "Save changes (keep unreviewed)"
+	ActionSaveReviewed ReviewAction = "Save & Mark Reviewed"
+)
+
 type ReviewResult struct {
 	Category string
 	Tags     []string
 	Memo     string
-	Skip     bool
+	Action   ReviewAction
 }
 
-// ReviewTransaction presents a form to the user to enrich a transaction.
-func ReviewTransaction(tx model.Transaction, categories []string, existingTags []string, suggestion *categorize.Estimation) (*ReviewResult, error) {
-	var (
-		category     string
-		newCategory  string
-		selectedTags []string
-		newTags      string
-		memo         = tx.Memo
-	)
+type ReviewFormState struct {
+	Category     string
+	NewCategory  string
+	SelectedTags []string
+	NewTags      string
+	Memo         string
+	Action       string
+}
 
-	if suggestion != nil {
-		category = suggestion.CategoryName
+// BuildReviewForm creates a huh form for the given transaction.
+func BuildReviewForm(tx model.Transaction, categories []string, existingTags []string, suggestion *categorize.Estimation, state *ReviewFormState) *huh.Form {
+	var suggestedText string
+	if suggestion != nil && suggestion.Confidence >= 0.5 {
+		state.Category = suggestion.CategoryName
+		suggestedText = fmt.Sprintf(" (Auto-suggested: %s, %.0f%% confidence)", suggestion.CategoryName, suggestion.Confidence*100)
+	} else if suggestion != nil {
+		suggestedText = fmt.Sprintf(" (Top guess: %s, %.0f%% confidence - below threshold)", suggestion.CategoryName, suggestion.Confidence*100)
 	}
+	state.Memo = tx.Memo
 
 	catOptions := []huh.Option[string]{
-		huh.NewOption("Skip (Leave Uncategorized)", ""),
+		huh.NewOption("None", ""),
 		huh.NewOption("[Add New Category...]", "__add_new__"),
 	}
 	for _, c := range categories {
@@ -38,9 +53,11 @@ func ReviewTransaction(tx model.Transaction, categories []string, existingTags [
 	}
 
 	var tagOptions []huh.Option[string]
-	for _, t := range existingTags { // Assume existingTags is passed as []string
+	for _, t := range existingTags {
 		tagOptions = append(tagOptions, huh.NewOption(t, t))
 	}
+
+	state.Action = string(ActionSaveReviewed) // Default action
 
 	form := huh.NewForm(
 		huh.NewGroup(
@@ -57,55 +74,63 @@ func ReviewTransaction(tx model.Transaction, categories []string, existingTags [
 			huh.NewSelect[string]().
 				Title("Category (Primary Budget Group)").
 				Options(catOptions...).
-				Value(&category).
-				Description("Type to fuzzy filter. Choose one main category."),
+				Value(&state.Category).
+				Description(strings.TrimSpace(suggestedText)),
 		),
 		huh.NewGroup(
 			huh.NewInput().
 				Title("New Category Name").
-				Value(&newCategory),
+				Value(&state.NewCategory),
 		).WithHideFunc(func() bool {
-			return category != "__add_new__"
+			return state.Category != "__add_new__"
 		}),
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
 				Title("Tags (Cross-category labels)").
 				Options(tagOptions...).
-				Value(&selectedTags).
-				Description("Type to fuzzy filter. Select space to toggle."),
+				Value(&state.SelectedTags).
+				Description("Select space to toggle."),
 			huh.NewInput().
 				Title("New Tag (optional)").
-				Value(&newTags),
+				Value(&state.NewTags),
 		),
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Update Memo").
-				Value(&memo).
+				Value(&state.Memo).
 				Description("Modify the existing memo if needed"),
 		),
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Action").
+				Options(
+					huh.NewOption(string(ActionSaveReviewed), string(ActionSaveReviewed)),
+					huh.NewOption(string(ActionSave), string(ActionSave)),
+					huh.NewOption(string(ActionDiscard), string(ActionDiscard)),
+				).
+				Value(&state.Action),
+		),
 	)
+	return form
+}
 
-	err := form.Run()
-	if err != nil {
-		return nil, err
-	}
-
-	// Resolve the final category and tags list
-	finalCategory := category
-	if category == "__add_new__" {
-		finalCategory = newCategory
+// ExtractReviewResult resolves the final category and tags list from the form state.
+func ExtractReviewResult(state *ReviewFormState) *ReviewResult {
+	finalCategory := state.Category
+	if state.Category == "__add_new__" {
+		finalCategory = state.NewCategory
 	}
 
 	finalTags := []string{}
-	finalTags = append(finalTags, selectedTags...)
-	if newTags != "" {
-		finalTags = append(finalTags, newTags)
+	finalTags = append(finalTags, state.SelectedTags...)
+	if state.NewTags != "" {
+		finalTags = append(finalTags, state.NewTags)
 	}
 
 	return &ReviewResult{
 		Category: finalCategory,
 		Tags:     finalTags,
-		Memo:     memo,
-		Skip:     finalCategory == "",
-	}, nil
+		Memo:     state.Memo,
+		Action:   ReviewAction(state.Action),
+	}
 }
