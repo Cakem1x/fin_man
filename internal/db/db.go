@@ -118,7 +118,10 @@ func (db *DB) GetUnreviewedTransactions(ctx context.Context) ([]model.Transactio
 		}
 		txs = append(txs, t)
 	}
-	return txs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return db.hydrateTags(ctx, txs)
 }
 
 func (db *DB) GetAllCategories(ctx context.Context) ([]model.Category, error) {
@@ -247,13 +250,12 @@ func (db *DB) GetAllTransactions(ctx context.Context) ([]model.Transaction, erro
 		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.CategoryName); err != nil {
 			return nil, fmt.Errorf("scan failed: %w", err)
 		}
-
-		// Note: We don't hydrate tags here yet for simplicity in this draft,
-		// but we would typically run a second query or JOIN to fetch tags.
-
 		txs = append(txs, t)
 	}
-	return txs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return db.hydrateTags(ctx, txs)
 }
 
 // GetCategorizedTransactions fetches transactions that have a category assigned.
@@ -278,6 +280,43 @@ func (db *DB) GetCategorizedTransactions(ctx context.Context) ([]model.Transacti
 
 		txs = append(txs, t)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return db.hydrateTags(ctx, txs)
+}
+
+func (db *DB) hydrateTags(ctx context.Context, txs []model.Transaction) ([]model.Transaction, error) {
+	if len(txs) == 0 {
+		return txs, nil
+	}
+
+	txIdxMap := make(map[string]int)
+	for i, tx := range txs {
+		txIdxMap[tx.ID] = i
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT tt.transaction_id, t.id, t.name
+		FROM transaction_tags tt
+		JOIN tags t ON tt.tag_id = t.id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("query tags failed: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var txID, tagID, tagName string
+		if err := rows.Scan(&txID, &tagID, &tagName); err != nil {
+			return nil, fmt.Errorf("scan tag failed: %w", err)
+		}
+
+		if idx, exists := txIdxMap[txID]; exists {
+			txs[idx].Tags = append(txs[idx].Tags, model.Tag{ID: tagID, Name: tagName})
+		}
+	}
+
 	return txs, rows.Err()
 }
 

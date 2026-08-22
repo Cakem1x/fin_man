@@ -21,7 +21,6 @@ type ReviewResult struct {
 	Category string
 	Tags     []string
 	Memo     string
-	Action   ReviewAction
 }
 
 type ReviewFormState struct {
@@ -31,8 +30,8 @@ type ReviewFormState struct {
 	Action       string
 }
 
-// BuildReviewForm creates a huh form for the given transaction.
-func BuildReviewForm(tx model.Transaction, categories []string, existingTags []string, suggestion *categorize.Estimation, state *ReviewFormState) *huh.Form {
+// BuildReviewForms creates three huh forms for the given transaction.
+func BuildReviewForms(tx model.Transaction, categories []string, existingTags []string, suggestion *categorize.Estimation, state *ReviewFormState) (*huh.Form, *huh.Form, *huh.Form) {
 	var suggestedText string
 	if suggestion != nil && suggestion.Confidence >= 0.5 {
 		state.Category = suggestion.CategoryName
@@ -56,18 +55,17 @@ func BuildReviewForm(tx model.Transaction, categories []string, existingTags []s
 
 	state.Action = string(ActionSaveReviewed) // Default action
 
-	form := huh.NewForm(
+	memoForm := huh.NewForm(
 		huh.NewGroup(
-			huh.NewNote().
-				Title("Transaction Review").
-				Description(fmt.Sprintf(
-					"Date:   %s\nPayee:  %s\nAmount: %.2f %s\nMemo:   %s",
-					tx.Date.Format("2006-01-02"),
-					tx.Payee,
-					float64(tx.AmountCents)/100.0,
-					tx.Currency,
-					tx.Memo,
-				)),
+			huh.NewInput().
+				Title("Update Memo").
+				Value(&state.Memo).
+				Description("Modify the existing memo if needed"),
+		),
+	)
+
+	catForm := huh.NewForm(
+		huh.NewGroup(
 			huh.NewSelect[string]().
 				Key("category").
 				Title("Category (Primary Budget Group)").
@@ -75,6 +73,9 @@ func BuildReviewForm(tx model.Transaction, categories []string, existingTags []s
 				Value(&state.Category).
 				Description(strings.TrimSpace(suggestedText)),
 		),
+	)
+
+	tagForm := huh.NewForm(
 		huh.NewGroup(
 			huh.NewMultiSelect[string]().
 				Key("tags").
@@ -83,24 +84,9 @@ func BuildReviewForm(tx model.Transaction, categories []string, existingTags []s
 				Value(&state.SelectedTags).
 				Description("Select space to toggle."),
 		),
-		huh.NewGroup(
-			huh.NewInput().
-				Title("Update Memo").
-				Value(&state.Memo).
-				Description("Modify the existing memo if needed"),
-		),
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title("Action").
-				Options(
-					huh.NewOption(string(ActionSaveReviewed), string(ActionSaveReviewed)),
-					huh.NewOption(string(ActionSave), string(ActionSave)),
-					huh.NewOption(string(ActionDiscard), string(ActionDiscard)),
-				).
-				Value(&state.Action),
-		),
 	)
-	return form
+
+	return memoForm, catForm, tagForm
 }
 
 // ExtractReviewResult resolves the final category and tags list from the form state.
@@ -109,6 +95,5 @@ func ExtractReviewResult(state *ReviewFormState) *ReviewResult {
 		Category: state.Category,
 		Tags:     state.SelectedTags,
 		Memo:     state.Memo,
-		Action:   ReviewAction(state.Action),
 	}
 }
