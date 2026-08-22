@@ -26,9 +26,7 @@ type ReviewResult struct {
 
 type ReviewFormState struct {
 	Category     string
-	NewCategory  string
 	SelectedTags []string
-	NewTags      string
 	Memo         string
 	Action       string
 }
@@ -46,7 +44,6 @@ func BuildReviewForm(tx model.Transaction, categories []string, existingTags []s
 
 	catOptions := []huh.Option[string]{
 		huh.NewOption("None", ""),
-		huh.NewOption("[Add New Category...]", "__add_new__"),
 	}
 	for _, c := range categories {
 		catOptions = append(catOptions, huh.NewOption(c, c))
@@ -72,27 +69,19 @@ func BuildReviewForm(tx model.Transaction, categories []string, existingTags []s
 					tx.Memo,
 				)),
 			huh.NewSelect[string]().
+				Key("category").
 				Title("Category (Primary Budget Group)").
 				Options(catOptions...).
 				Value(&state.Category).
 				Description(strings.TrimSpace(suggestedText)),
 		),
 		huh.NewGroup(
-			huh.NewInput().
-				Title("New Category Name").
-				Value(&state.NewCategory),
-		).WithHideFunc(func() bool {
-			return state.Category != "__add_new__"
-		}),
-		huh.NewGroup(
 			huh.NewMultiSelect[string]().
+				Key("tags").
 				Title("Tags (Cross-category labels)").
 				Options(tagOptions...).
 				Value(&state.SelectedTags).
 				Description("Select space to toggle."),
-			huh.NewInput().
-				Title("New Tag (optional)").
-				Value(&state.NewTags),
 		),
 		huh.NewGroup(
 			huh.NewInput().
@@ -116,20 +105,9 @@ func BuildReviewForm(tx model.Transaction, categories []string, existingTags []s
 
 // ExtractReviewResult resolves the final category and tags list from the form state.
 func ExtractReviewResult(state *ReviewFormState) *ReviewResult {
-	finalCategory := state.Category
-	if state.Category == "__add_new__" {
-		finalCategory = state.NewCategory
-	}
-
-	finalTags := []string{}
-	finalTags = append(finalTags, state.SelectedTags...)
-	if state.NewTags != "" {
-		finalTags = append(finalTags, state.NewTags)
-	}
-
 	return &ReviewResult{
-		Category: finalCategory,
-		Tags:     finalTags,
+		Category: state.Category,
+		Tags:     state.SelectedTags,
 		Memo:     state.Memo,
 		Action:   ReviewAction(state.Action),
 	}

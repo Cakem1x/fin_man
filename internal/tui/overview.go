@@ -13,6 +13,7 @@ import (
 	"github.com/Cakem1x/fin_man/internal/model"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -90,6 +91,35 @@ func (i categoryItem) FilterValue() string {
 	return i.fullPath
 }
 
+func getTableStyles(focused bool) table.Styles {
+	s := table.DefaultStyles()
+	s.Header = s.Header.
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		BorderBottom(true).
+		Bold(false)
+
+	if focused {
+		s.Selected = s.Selected.
+			Foreground(lipgloss.Color("229")).
+			Background(lipgloss.Color("57")).
+			Bold(false)
+	} else {
+		// When blurred, no special background
+		s.Selected = lipgloss.NewStyle()
+	}
+	return s
+}
+
+func getListDelegate(focused bool) list.DefaultDelegate {
+	d := list.NewDefaultDelegate()
+	if !focused {
+		d.Styles.SelectedTitle = d.Styles.NormalTitle
+		d.Styles.SelectedDesc = d.Styles.NormalDesc
+	}
+	return d
+}
+
 type catNode struct {
 	name       string
 	fullPath   string
@@ -109,13 +139,18 @@ type OverviewModel struct {
 	activePane int // 0 for list, 1 for table
 
 	// Review form overlay
-	reviewingTx bool
-	reviewingID string
-	categories  []string
-	tags        []string
-	estimator   *categorize.Estimator
-	reviewForm  *huh.Form
-	reviewState *ReviewFormState
+	reviewingTx     bool
+	reviewingID     string
+	reviewingTxData model.Transaction
+	categories      []string
+	tags            []string
+	estimator       *categorize.Estimator
+	reviewForm      *huh.Form
+	reviewState     *ReviewFormState
+
+	addingNew     bool
+	addingNewType string // "category" or "tags"
+	newInput      textinput.Model
 
 	width  int
 	height int
@@ -123,7 +158,7 @@ type OverviewModel struct {
 
 func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB) OverviewModel {
 	// Setup list
-	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	l := list.New([]list.Item{}, getListDelegate(true), 0, 0)
 	l.Title = "Categories"
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
@@ -140,17 +175,7 @@ func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB) OverviewM
 		table.WithFocused(false),
 		table.WithHeight(10),
 	)
-	s := table.DefaultStyles()
-	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		BorderBottom(true).
-		Bold(false)
-	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
-		Bold(false)
-	t.SetStyles(s)
+	t.SetStyles(getTableStyles(false))
 
 	ctx := context.Background()
 	cats, _ := dbConn.GetAllCategories(ctx)
@@ -168,6 +193,11 @@ func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB) OverviewM
 	categorizedTxs, _ := dbConn.GetCategorizedTransactions(ctx)
 	estimator := categorize.NewEstimator(categorizedTxs)
 
+	ti := textinput.New()
+	ti.Placeholder = ""
+	ti.CharLimit = 100
+	ti.Width = 40
+
 	m := OverviewModel{
 		dbConn:       dbConn,
 		transactions: transactions,
@@ -178,6 +208,7 @@ func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB) OverviewM
 		categories:   catNames,
 		tags:         tagNames,
 		estimator:    estimator,
+		newInput:     ti,
 	}
 	m.updateData()
 	return m
@@ -187,14 +218,15 @@ func (m *OverviewModel) Init() tea.Cmd {
 	return nil
 }
 
-func (m *OverviewModel) openReviewForm(tx model.Transaction) {
+func (m *OverviewModel) openReviewForm(tx model.Transaction) tea.Cmd {
 	suggestion := m.estimator.Estimate(tx)
 	state := &ReviewFormState{}
 	m.reviewState = state
 	m.reviewForm = BuildReviewForm(tx, m.categories, m.tags, suggestion, state)
 	m.reviewingID = tx.ID
+	m.reviewingTxData = tx
 	m.reviewingTx = true
-	m.reviewForm.Init()
+	return m.reviewForm.Init()
 }
 
 func (m *OverviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -249,11 +281,15 @@ func (m *OverviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() == "h" || msg.String() == "left" {
 				m.activePane = 0
 				m.catList.Title = "Categories"
+				m.catList.SetDelegate(getListDelegate(true))
 				m.txTable.Blur()
+				m.txTable.SetStyles(getTableStyles(false))
 			} else if msg.String() == "l" || msg.String() == "right" {
 				m.activePane = 1
 				m.catList.Title = "Categories"
+				m.catList.SetDelegate(getListDelegate(false))
 				m.txTable.Focus()
+				m.txTable.SetStyles(getTableStyles(true))
 			}
 		}
 
@@ -284,16 +320,69 @@ func (m *OverviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				displayed := m.getDisplayedTransactions()
 				idx := m.txTable.Cursor()
 				if idx >= 0 && idx < len(displayed) {
-					m.openReviewForm(displayed[idx])
+					cmd = m.openReviewForm(displayed[idx])
 				}
-				return m, nil
+				return m, cmd
 			}
 
 			m.txTable, cmd = m.txTable.Update(msg)
 			cmds = append(cmds, cmd)
 		}
 	} else {
+		if m.addingNew {
+			if msg, ok := msg.(tea.KeyMsg); ok {
+				switch msg.String() {
+				case "esc":
+					m.addingNew = false
+					m.newInput.Blur()
+					return m, nil
+				case "enter":
+					val := strings.TrimSpace(m.newInput.Value())
+					var batchCmds []tea.Cmd
+					if val != "" {
+						switch m.addingNewType {
+						case "category":
+							m.categories = append(m.categories, val)
+							m.reviewState.Category = val
+							m.reviewForm = BuildReviewForm(m.reviewingTxData, m.categories, m.tags, m.estimator.Estimate(m.reviewingTxData), m.reviewState)
+							batchCmds = append(batchCmds, m.reviewForm.Init(), m.reviewForm.NextGroup())
+						case "tags":
+							m.tags = append(m.tags, val)
+							m.reviewState.SelectedTags = append(m.reviewState.SelectedTags, val)
+							m.reviewForm = BuildReviewForm(m.reviewingTxData, m.categories, m.tags, m.estimator.Estimate(m.reviewingTxData), m.reviewState)
+							batchCmds = append(batchCmds, m.reviewForm.Init(), m.reviewForm.NextGroup())
+						}
+					}
+					m.addingNew = false
+					m.newInput.Blur()
+					return m, tea.Batch(batchCmds...)
+				}
+			}
+			m.newInput, cmd = m.newInput.Update(msg)
+			cmds = append(cmds, cmd)
+			return m, tea.Batch(cmds...)
+		}
+
 		if m.reviewForm != nil {
+			if msg, ok := msg.(tea.KeyMsg); ok && msg.String() == "n" {
+				f := m.reviewForm.GetFocusedField()
+				if sel, ok := f.(*huh.Select[string]); ok && sel.GetKey() == "category" && !sel.GetFiltering() {
+					m.addingNew = true
+					m.addingNewType = "category"
+					m.newInput.Placeholder = "New Category Name"
+					m.newInput.Reset()
+					m.newInput.Focus()
+					return m, nil
+				} else if msel, ok := f.(*huh.MultiSelect[string]); ok && msel.GetKey() == "tags" && !msel.GetFiltering() {
+					m.addingNew = true
+					m.addingNewType = "tags"
+					m.newInput.Placeholder = "New Tag Name"
+					m.newInput.Reset()
+					m.newInput.Focus()
+					return m, nil
+				}
+			}
+
 			var newForm tea.Model
 			newForm, cmd = m.reviewForm.Update(msg)
 			if f, ok := newForm.(*huh.Form); ok {
@@ -591,6 +680,7 @@ func (m *OverviewModel) updateTableData() {
 	}
 
 	m.txTable.SetRows(rows)
+	m.txTable.SetCursor(0)
 }
 
 func (m *OverviewModel) View() string {
@@ -626,8 +716,19 @@ func (m *OverviewModel) View() string {
 		if m.reviewForm != nil {
 			formView = m.reviewForm.View()
 		}
-		help = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("\n[esc] Abort • [/] Fuzzy Filter")
-		content = lipgloss.JoinVertical(lipgloss.Left, header, formView, help)
+
+		if m.addingNew {
+			dialog := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("62")).
+				Padding(1, 2).
+				Render("Enter new " + m.addingNewType + ":\n\n" + m.newInput.View())
+			help = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("\n[esc] Cancel • [enter] Submit")
+			content = lipgloss.JoinVertical(lipgloss.Left, header, formView, dialog, help)
+		} else {
+			help = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("\n[esc] Abort • [/] Fuzzy Filter • [n] New Category/Tag")
+			content = lipgloss.JoinVertical(lipgloss.Left, header, formView, help)
+		}
 	}
 
 	return appStyle.Render(content)
