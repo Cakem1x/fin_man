@@ -10,7 +10,7 @@ buildGoModule {
   pname = "fin_man";
   version = "0.1.0";
   src = ../.; # Root of the repository
-  vendorHash = "sha256-DgcmFVUo7mLmbz1DKy6oUTmPPT0ZbTxkXBa19ingdkQ=";
+  vendorHash = "sha256-weEU8aGR1t0TwFqRmE6CEevy/A3aTT2FrKNobsnU93M=";
 
   subPackages = [ "cmd/fin" ];
 
