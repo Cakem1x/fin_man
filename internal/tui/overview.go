@@ -276,6 +276,22 @@ func (m *OverviewModel) saveReview(res *ReviewResult) (tea.Model, tea.Cmd) {
 					m.transactions[i].CategoryName = &catName
 					m.transactions[i].IsReviewed = markReviewed
 					m.transactions[i].Memo = res.Memo
+
+					// Online learning: teach the estimator from the reviewed transaction.
+					if markReviewed && res.Category != "" {
+						learnTx := m.transactions[i]
+						catID := res.Category // use name as fallback ID
+						learnTx.CategoryID = &catID
+						learnTx.CategoryName = &catName
+						var learnTags []model.Tag
+						for _, tagName := range res.Tags {
+							if tagName != "" {
+								learnTags = append(learnTags, model.Tag{ID: tagName, Name: tagName})
+							}
+						}
+						learnTx.Tags = learnTags
+						m.estimator.Learn(learnTx)
+					}
 					break
 				}
 			}

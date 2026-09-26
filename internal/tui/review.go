@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/Cakem1x/fin_man/internal/categorize"
@@ -100,20 +101,57 @@ type ReviewModel struct {
 }
 
 func NewReviewModel(tx model.Transaction, categories []string, tags []string, suggestion *categorize.Estimation, width, height int) ReviewModel {
+	categories = append([]string(nil), categories...)
+	tags = append([]string(nil), tags...)
 	m := ReviewModel{
-		Tx:               tx,
-		selectedTags:     make(map[string]bool),
-		memo:             tx.Memo,
-		focusedPane:      PaneCategory,
-		width:            width,
-		height:           height,
+		Tx:           tx,
+		selectedTags: make(map[string]bool),
+		memo:         tx.Memo,
+		focusedPane:  PaneCategory,
+		width:        width,
+		height:       height,
 	}
 
-	var suggestedText string
-	if suggestion != nil && suggestion.Confidence >= 0.5 {
-		m.selectedCategory = suggestion.CategoryName
-		suggestedText = fmt.Sprintf("Auto-suggested: %.0f%% confidence", suggestion.Confidence*100)
+	// Build score lookup maps from estimation.
+	catScoreMap := make(map[string]float64)
+	tagScoreMap := make(map[string]float64)
+	if suggestion != nil {
+		for _, cs := range suggestion.CategoryScores {
+			catScoreMap[cs.CategoryName] = cs.Score
+		}
+		for _, ts := range suggestion.TagScores {
+			tagScoreMap[ts.TagName] = ts.Score
+		}
 	}
+
+	// Auto-select top category if its score > 0.8.
+	if suggestion != nil && len(suggestion.CategoryScores) > 0 && suggestion.CategoryScores[0].Score > 0.8 {
+		m.selectedCategory = suggestion.CategoryScores[0].CategoryName
+	}
+
+	// Pre-select existing tags on the transaction.
+	for _, t := range tx.Tags {
+		m.selectedTags[t.Name] = true
+	}
+
+	// Auto-select tags with score > 0.8.
+	if suggestion != nil {
+		for _, ts := range suggestion.TagScores {
+			if ts.Score > 0.8 {
+				m.selectedTags[ts.TagName] = true
+			}
+		}
+	}
+
+	// Sort categories by score (descending), keeping the original order as tiebreaker.
+	sort.SliceStable(categories, func(i, j int) bool {
+		return catScoreMap[categories[i]] > catScoreMap[categories[j]]
+	})
+
+	// Sort tags by score (descending), keeping the original order as tiebreaker.
+	sort.SliceStable(tags, func(i, j int) bool {
+		return tagScoreMap[tags[i]] > tagScoreMap[tags[j]]
+	})
 
 	// Setup Category List
 	catDel := list.NewDefaultDelegate()
@@ -128,8 +166,8 @@ func NewReviewModel(tx model.Transaction, categories []string, tags []string, su
 	catItems = append(catItems, selectableItem{id: "", title: "None", selected: m.selectedCategory == "", isMulti: false})
 	for _, c := range categories {
 		desc := ""
-		if suggestion != nil && suggestion.CategoryName == c {
-			desc = suggestedText
+		if score, ok := catScoreMap[c]; ok && score > 0.01 {
+			desc = fmt.Sprintf("%.0f%% match", score*100)
 		}
 		catItems = append(catItems, selectableItem{id: c, title: c, selected: m.selectedCategory == c, isMulti: false, desc: desc})
 	}
@@ -137,7 +175,7 @@ func NewReviewModel(tx model.Transaction, categories []string, tags []string, su
 
 	// Setup Tag List
 	tagDel := list.NewDefaultDelegate()
-	tagDel.ShowDescription = false
+	tagDel.ShowDescription = true
 	m.tagList = list.New([]list.Item{}, tagDel, 0, 0)
 	m.tagList.Title = "Tags (Cross-category labels)"
 	m.tagList.SetShowHelp(false)
@@ -146,7 +184,11 @@ func NewReviewModel(tx model.Transaction, categories []string, tags []string, su
 
 	var tagItems []list.Item
 	for _, t := range tags {
-		tagItems = append(tagItems, selectableItem{id: t, title: t, selected: false, isMulti: true})
+		desc := ""
+		if score, ok := tagScoreMap[t]; ok && score > 0.01 {
+			desc = fmt.Sprintf("%.0f%% match", score*100)
+		}
+		tagItems = append(tagItems, selectableItem{id: t, title: t, selected: m.selectedTags[t], isMulti: true, desc: desc})
 	}
 	m.tagList.SetItems(tagItems)
 
@@ -341,7 +383,16 @@ func (m *ReviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if val != "" {
 					if m.addingNewType == "category" {
 						items := m.catList.Items()
-						items = append(items, selectableItem{id: val, title: val, selected: true, isMulti: false})
+						found := false
+						for _, item := range items {
+							if existing, ok := item.(selectableItem); ok && existing.id == val {
+								found = true
+								break
+							}
+						}
+						if !found {
+							items = append(items, selectableItem{id: val, title: val, isMulti: false})
+						}
 						m.selectedCategory = val
 						for i, it := range items {
 							s := it.(selectableItem)
@@ -351,7 +402,16 @@ func (m *ReviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.catList.SetItems(items)
 					} else {
 						items := m.tagList.Items()
-						items = append(items, selectableItem{id: val, title: val, selected: true, isMulti: true})
+						found := false
+						for _, item := range items {
+							if existing, ok := item.(selectableItem); ok && existing.id == val {
+								found = true
+								break
+							}
+						}
+						if !found {
+							items = append(items, selectableItem{id: val, title: val, isMulti: true})
+						}
 						m.selectedTags[val] = true
 						m.tagList.SetItems(items)
 					}
@@ -364,7 +424,6 @@ func (m *ReviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 			return m, tea.Batch(cmds...)
 		}
-
 
 		if m.editingMemo {
 			switch msg.String() {
@@ -403,7 +462,7 @@ func (m *ReviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, textinput.Blink
 			} else if m.focusedPane == PaneTags && m.tagList.FilterState() != list.Filtering {
 				m.addingNew = true
-				m.addingNewType = "tags"
+				m.addingNewType = "tag"
 				m.newInput.Placeholder = "New Tag Name"
 				m.newInput.Reset()
 				m.newInput.Focus()
@@ -576,7 +635,7 @@ func (m *ReviewModel) View() string {
 	bottom := lipgloss.JoinHorizontal(lipgloss.Top, bottomLeft, bottomRight)
 	formView := lipgloss.JoinVertical(lipgloss.Left, topView, bottom)
 
-	helpText := "\n[tab] Switch Pane • [enter] Select/Action • [esc] Exit Options • [/] Filter • [m] Receipt Matcher"
+	helpText := "\n[tab] Switch Pane • [enter] Select/Action • [n] New Category/Tag • [esc] Exit Options • [/] Filter • [m] Receipt Matcher"
 	if m.editingMemo {
 		helpText = "\n[enter/esc] Done Editing"
 	}
