@@ -189,7 +189,7 @@ func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB) OverviewM
 	m := OverviewModel{
 		dbConn:       dbConn,
 		transactions: transactions,
-		filter:       filterCurrentMonth,
+		filter:       filterAllTime,
 		catList:      l,
 		txTable:      t,
 		activePane:   0,
