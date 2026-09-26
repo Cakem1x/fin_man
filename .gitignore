@@ -2,3 +2,4 @@
 bin
 # gets symlinked via nix develop
 .pre-commit-config.yaml
+vendor/*
