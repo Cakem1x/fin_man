@@ -13,13 +13,14 @@ import (
 	"github.com/Cakem1x/fin_man/internal/model"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 var (
-	appStyle    = lipgloss.NewStyle().Padding(1, 2)
-	titleStyle  = lipgloss.NewStyle().
+	appStyle   = lipgloss.NewStyle().Padding(1, 2)
+	titleStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFDF5")).
 			Background(lipgloss.Color("#25A065")).
 			Padding(0, 1).
@@ -27,14 +28,14 @@ var (
 	filterStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#A0A0A0")).MarginBottom(1)
 
 	focusedPaneStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("62")).
-			Padding(0, 1)
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("62")).
+				Padding(0, 1)
 
 	blurredPaneStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
-			Padding(0, 1)
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("240")).
+				Padding(0, 1)
 )
 
 type timeFilter int
@@ -146,12 +147,16 @@ type OverviewModel struct {
 	latestDate     time.Time
 
 	// Review form overlay
-	reviewingTx     bool
-	reviewingID     string
-	categories      []string
-	tags            []string
-	estimator       *categorize.Estimator
-	reviewModel     *ReviewModel
+	reviewingTx      bool
+	reviewingID      string
+	categories       []string
+	tags             []string
+	estimator        *categorize.Estimator
+	reviewModel      *ReviewModel
+	renamingCategory bool
+	renameInput      textinput.Model
+	renamePath       string
+	categoryMessage  string
 
 	width  int
 	height int
@@ -206,6 +211,8 @@ func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB) OverviewM
 		tags:         tagNames,
 		estimator:    estimator,
 	}
+	m.renameInput = textinput.New()
+	m.renameInput.Width = 36
 	m.updateData()
 	return m
 }
@@ -224,8 +231,6 @@ func (m *OverviewModel) openReviewForm(tx model.Transaction) tea.Cmd {
 
 	return m.reviewModel.Init()
 }
-
-
 
 func (m *OverviewModel) saveReview(res *ReviewResult) (tea.Model, tea.Cmd) {
 	ctx := context.Background()
@@ -347,6 +352,51 @@ func (m *OverviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		if m.renamingCategory {
+			switch msg.String() {
+			case "esc":
+				m.renamingCategory = false
+				m.categoryMessage = ""
+				return m, nil
+			case "enter":
+				oldPath := m.renamePath
+				newName := strings.TrimSpace(m.renameInput.Value())
+				if err := m.dbConn.RenameCategory(context.Background(), oldPath, newName); err != nil {
+					m.categoryMessage = err.Error()
+					return m, nil
+				}
+				oldLeaf := oldPath
+				if idx := strings.LastIndex(oldLeaf, "/"); idx >= 0 {
+					oldLeaf = oldLeaf[idx+1:]
+				}
+				newPath := strings.TrimSuffix(oldPath, oldLeaf) + newName
+				for i := range m.categories {
+					if m.categories[i] == oldPath || strings.HasPrefix(m.categories[i], oldPath+"/") {
+						m.categories[i] = newPath + strings.TrimPrefix(m.categories[i], oldPath)
+					}
+				}
+				for i := range m.transactions {
+					if m.transactions[i].CategoryName != nil && (*m.transactions[i].CategoryName == oldPath || strings.HasPrefix(*m.transactions[i].CategoryName, oldPath+"/")) {
+						name := newPath + strings.TrimPrefix(*m.transactions[i].CategoryName, oldPath)
+						m.transactions[i].CategoryName = &name
+					}
+				}
+				m.renamingCategory = false
+				m.categoryMessage = ""
+				m.updateData()
+				for i, listItem := range m.catList.Items() {
+					if category, ok := listItem.(categoryItem); ok && category.fullPath == newPath {
+						m.catList.Select(i)
+						break
+					}
+				}
+				m.updateTableData()
+				return m, nil
+			default:
+				m.renameInput, cmd = m.renameInput.Update(msg)
+				return m, cmd
+			}
+		}
 		if m.reviewingTx {
 			// If in review form, we don't process global hotkeys like 'q' or 'tab'
 			break
@@ -359,9 +409,51 @@ func (m *OverviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filter = (m.filter + 1) % 3
 			m.updateData()
 			return m, nil
+		case "r":
+			if m.activePane == 0 {
+				if item, ok := m.catList.SelectedItem().(categoryItem); ok && !item.isUnreviewed && !item.isSeparator {
+					m.renamePath = item.fullPath
+					m.renameInput.SetValue(item.fullPath[strings.LastIndex(item.fullPath, "/")+1:])
+					m.renameInput.Focus()
+					m.renamingCategory = true
+					return m, textinput.Blink
+				}
+			}
+		case "d":
+			if m.activePane == 0 {
+				if item, ok := m.catList.SelectedItem().(categoryItem); ok && !item.isUnreviewed && !item.isSeparator {
+					if err := m.dbConn.DeleteEmptyCategory(context.Background(), item.fullPath); err != nil {
+						m.categoryMessage = err.Error()
+						return m, nil
+					}
+					for i, category := range m.categories {
+						if category == item.fullPath {
+							m.categories = append(m.categories[:i], m.categories[i+1:]...)
+							break
+						}
+					}
+					parentPath := "__unreviewed__"
+					if slash := strings.LastIndex(item.fullPath, "/"); slash >= 0 {
+						parentPath = item.fullPath[:slash]
+					}
+					m.categoryMessage = ""
+					m.updateData()
+					for i, listItem := range m.catList.Items() {
+						if category, ok := listItem.(categoryItem); ok && category.fullPath == parentPath {
+							m.catList.Select(i)
+							break
+						}
+					}
+					m.updateTableData()
+					return m, nil
+				}
+			}
 		}
 	}
 
+	if m.renamingCategory {
+		return m, nil
+	}
 	if !m.reviewingTx {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
@@ -716,13 +808,18 @@ func (m *OverviewModel) View() string {
 
 		var helpText string
 		if m.activePane == 0 {
-			helpText = "\n[q] Quit • [tab] Toggle Filter • [enter/l] View Transactions • [j/k] Navigate"
+			helpText = "\n[q] Quit • [tab] Toggle Filter • [enter/l] View Transactions • [r] Rename • [d] Remove empty • [j/k] Navigate"
 		} else {
 			helpText = "\n[q] Quit • [tab] Toggle Filter • [esc/h] Back to Categories • [enter] Edit Transaction • [j/k] Navigate"
 		}
 		help = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(helpText)
 
 		content = lipgloss.JoinVertical(lipgloss.Left, header, panes, help)
+		if m.renamingCategory {
+			content = lipgloss.JoinVertical(lipgloss.Left, content, "Rename category segment (Enter save, Esc cancel):", m.renameInput.View())
+		} else if m.categoryMessage != "" {
+			content = lipgloss.JoinVertical(lipgloss.Left, content, lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(m.categoryMessage))
+		}
 	} else {
 		content = lipgloss.JoinVertical(lipgloss.Left, header, m.reviewModel.View())
 	}

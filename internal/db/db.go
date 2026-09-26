@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/Cakem1x/fin_man/internal/model"
 	_ "github.com/mattn/go-sqlite3"
@@ -140,6 +141,123 @@ func (db *DB) GetAllCategories(ctx context.Context) ([]model.Category, error) {
 		cats = append(cats, c)
 	}
 	return cats, rows.Err()
+}
+
+// RenameCategory renames one path segment and carries the change through all
+// nested categories. Category IDs stay stable, so transaction assignments do
+// not need to be rewritten.
+func (db *DB) RenameCategory(ctx context.Context, oldPath, newName string) error {
+	newName = strings.TrimSpace(newName)
+	if newName == "" || strings.Contains(newName, "/") {
+		return fmt.Errorf("category name must be non-empty and cannot contain '/'")
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin category rename: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var id string
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM categories WHERE name = ?", oldPath).Scan(&id); err != nil {
+		return fmt.Errorf("category %q not found: %w", oldPath, err)
+	}
+	parent := ""
+	if idx := strings.LastIndex(oldPath, "/"); idx >= 0 {
+		parent = oldPath[:idx+1]
+	}
+	newPath := parent + newName
+	rows, err := tx.QueryContext(ctx, "SELECT id, name FROM categories")
+	if err != nil {
+		return fmt.Errorf("failed to find nested categories: %w", err)
+	}
+	type rename struct{ id, old, next string }
+	var renames []rename
+	for rows.Next() {
+		var r rename
+		if err := rows.Scan(&r.id, &r.old); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if r.old != oldPath && !strings.HasPrefix(r.old, oldPath+"/") {
+			continue
+		}
+		r.next = newPath + strings.TrimPrefix(r.old, oldPath)
+		renames = append(renames, r)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	for _, r := range renames {
+		var collision string
+		err := tx.QueryRowContext(ctx, "SELECT id FROM categories WHERE name = ?", r.next).Scan(&collision)
+		if err == nil && collision != r.id {
+			return fmt.Errorf("category %q already exists", r.next)
+		}
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+	}
+	for i, r := range renames {
+		if _, err := tx.ExecContext(ctx, "UPDATE categories SET name = ? WHERE id = ?", fmt.Sprintf("__rename_%d_%s", i, id), r.id); err != nil {
+			return fmt.Errorf("failed to stage category rename: %w", err)
+		}
+	}
+	for _, r := range renames {
+		if _, err := tx.ExecContext(ctx, "UPDATE categories SET name = ? WHERE id = ?", r.next, r.id); err != nil {
+			return fmt.Errorf("failed to rename category: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// DeleteEmptyCategory removes a category only when it has no assigned
+// transactions and no nested categories.
+func (db *DB) DeleteEmptyCategory(ctx context.Context, name string) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin category deletion: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var id string
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM categories WHERE name = ?", name).Scan(&id); err != nil {
+		return fmt.Errorf("category %q not found: %w", name, err)
+	}
+	var assigned, children int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM transactions WHERE category_id = ?", id).Scan(&assigned); err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT name FROM categories")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var childName string
+		if err := rows.Scan(&childName); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if strings.HasPrefix(childName, name+"/") {
+			children++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	_ = rows.Close()
+	if assigned > 0 {
+		return fmt.Errorf("category %q is used by %d transaction(s)", name, assigned)
+	}
+	if children > 0 {
+		return fmt.Errorf("category %q has nested categories", name)
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM categories WHERE id = ?", id); err != nil {
+		return fmt.Errorf("failed to delete category %q: %w", name, err)
+	}
+	return tx.Commit()
 }
 
 func (db *DB) GetAllTags(ctx context.Context) ([]model.Tag, error) {
