@@ -136,6 +136,11 @@ type OverviewModel struct {
 	txTable    table.Model
 	activePane int // 0 for list, 1 for table
 
+	// Stats
+	displayedCount int
+	earliestDate   time.Time
+	latestDate     time.Time
+
 	// Review form overlay
 	reviewingTx     bool
 	reviewingID     string
@@ -605,6 +610,13 @@ func (m *OverviewModel) getDisplayedTransactions() []model.Transaction {
 
 func (m *OverviewModel) updateTableData() {
 	displayed := m.getDisplayedTransactions()
+
+	m.displayedCount = len(displayed)
+	if len(displayed) > 0 {
+		m.latestDate = displayed[0].Date
+		m.earliestDate = displayed[len(displayed)-1].Date
+	}
+
 	var rows []table.Row
 
 	for _, tx := range displayed {
@@ -639,7 +651,18 @@ func (m *OverviewModel) View() string {
 	}
 
 	title := titleStyle.Render(" Finance Overview ")
-	filterText := filterStyle.Render(fmt.Sprintf("Filter: %s (press tab to toggle)", m.filter.String()))
+
+	statsText := ""
+	if m.displayedCount > 0 {
+		statsText = fmt.Sprintf(" | %d transactions (%s - %s)",
+			m.displayedCount,
+			m.earliestDate.Format("2006-01-02"),
+			m.latestDate.Format("2006-01-02"))
+	} else {
+		statsText = " | 0 transactions"
+	}
+
+	filterText := filterStyle.Render(fmt.Sprintf("Filter: %s (press tab to toggle)%s", m.filter.String(), statsText))
 	header := lipgloss.JoinVertical(lipgloss.Left, title, filterText)
 
 	var content string
