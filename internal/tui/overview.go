@@ -112,8 +112,12 @@ func getTableStyles(focused bool) table.Styles {
 func getListDelegate(focused bool) list.DefaultDelegate {
 	d := list.NewDefaultDelegate()
 	if !focused {
-		d.Styles.SelectedTitle = d.Styles.NormalTitle
-		d.Styles.SelectedDesc = d.Styles.NormalDesc
+		grey := lipgloss.Color("240")
+		lightGrey := lipgloss.Color("246")
+		d.Styles.NormalTitle = d.Styles.NormalTitle.Foreground(grey)
+		d.Styles.NormalDesc = d.Styles.NormalDesc.Foreground(grey)
+		d.Styles.SelectedTitle = d.Styles.SelectedTitle.Foreground(lightGrey).BorderForeground(grey)
+		d.Styles.SelectedDesc = d.Styles.SelectedDesc.Foreground(grey).BorderForeground(grey)
 	}
 	return d
 }
@@ -224,46 +228,56 @@ func (m *OverviewModel) openReviewForm(tx model.Transaction) tea.Cmd {
 
 
 func (m *OverviewModel) saveReview(res *ReviewResult) (tea.Model, tea.Cmd) {
-	markReviewed := res.Action == ActionSaveReviewed
 	ctx := context.Background()
-	err := m.dbConn.EnrichTransaction(ctx, m.reviewingID, res.Category, res.Tags, res.Memo, markReviewed)
-	if err != nil {
-		log.Printf("failed to save transaction %s: %v", m.reviewingID, err)
+
+	if res.Action == ActionSplit {
+		err := m.dbConn.SplitTransaction(ctx, m.reviewingID, res.Splits)
+		if err != nil {
+			log.Printf("failed to split transaction %s: %v", m.reviewingID, err)
+		} else {
+			m.transactions, _ = m.dbConn.GetAllTransactions(ctx)
+		}
 	} else {
-		if res.Category != "" {
-			found := false
-			for _, c := range m.categories {
-				if c == res.Category {
-					found = true
-					break
+		markReviewed := res.Action == ActionSaveReviewed
+		err := m.dbConn.EnrichTransaction(ctx, m.reviewingID, res.Category, res.Tags, res.Memo, markReviewed)
+		if err != nil {
+			log.Printf("failed to save transaction %s: %v", m.reviewingID, err)
+		} else {
+			if res.Category != "" {
+				found := false
+				for _, c := range m.categories {
+					if c == res.Category {
+						found = true
+						break
+					}
+				}
+				if !found {
+					m.categories = append(m.categories, res.Category)
 				}
 			}
-			if !found {
-				m.categories = append(m.categories, res.Category)
-			}
-		}
-		for _, t := range res.Tags {
-			if t == "" {
-				continue
-			}
-			found := false
-			for _, existing := range m.tags {
-				if existing == t {
-					found = true
-					break
+			for _, t := range res.Tags {
+				if t == "" {
+					continue
+				}
+				found := false
+				for _, existing := range m.tags {
+					if existing == t {
+						found = true
+						break
+					}
+				}
+				if !found {
+					m.tags = append(m.tags, t)
 				}
 			}
-			if !found {
-				m.tags = append(m.tags, t)
-			}
-		}
-		for i, t := range m.transactions {
-			if t.ID == m.reviewingID {
-				catName := res.Category
-				m.transactions[i].CategoryName = &catName
-				m.transactions[i].IsReviewed = markReviewed
-				m.transactions[i].Memo = res.Memo
-				break
+			for i, t := range m.transactions {
+				if t.ID == m.reviewingID {
+					catName := res.Category
+					m.transactions[i].CategoryName = &catName
+					m.transactions[i].IsReviewed = markReviewed
+					m.transactions[i].Memo = res.Memo
+					break
+				}
 			}
 		}
 	}
@@ -335,18 +349,20 @@ func (m *OverviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !m.reviewingTx {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
-			if msg.String() == "h" || msg.String() == "left" {
+			if m.activePane == 1 && (msg.String() == "esc" || msg.String() == "h" || msg.String() == "left") {
 				m.activePane = 0
 				m.catList.Title = "Categories"
 				m.catList.SetDelegate(getListDelegate(true))
 				m.txTable.Blur()
 				m.txTable.SetStyles(getTableStyles(false))
-			} else if msg.String() == "l" || msg.String() == "right" {
+				return m, nil
+			} else if m.activePane == 0 && (msg.String() == "enter" || msg.String() == "l" || msg.String() == "right") {
 				m.activePane = 1
 				m.catList.Title = "Categories"
 				m.catList.SetDelegate(getListDelegate(false))
 				m.txTable.Focus()
 				m.txTable.SetStyles(getTableStyles(true))
+				return m, nil
 			}
 		}
 
@@ -681,7 +697,14 @@ func (m *OverviewModel) View() string {
 		listView := leftStyle.Render(m.catList.View())
 		tableView := rightStyle.Render(m.txTable.View())
 		panes := lipgloss.JoinHorizontal(lipgloss.Top, listView, tableView)
-		help = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("\n[q] Quit • [tab] Toggle Filter • [h/l] Switch Panes • [enter] Edit Transaction • [j/k] Navigate")
+
+		var helpText string
+		if m.activePane == 0 {
+			helpText = "\n[q] Quit • [tab] Toggle Filter • [enter/l] View Transactions • [j/k] Navigate"
+		} else {
+			helpText = "\n[q] Quit • [tab] Toggle Filter • [esc/h] Back to Categories • [enter] Edit Transaction • [j/k] Navigate"
+		}
+		help = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(helpText)
 
 		content = lipgloss.JoinVertical(lipgloss.Left, header, panes, help)
 	} else {

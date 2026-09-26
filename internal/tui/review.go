@@ -2,10 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/Cakem1x/fin_man/internal/categorize"
+	"github.com/Cakem1x/fin_man/internal/importer"
 	"github.com/Cakem1x/fin_man/internal/model"
+	"github.com/charmbracelet/bubbles/filepicker"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,6 +21,7 @@ const (
 	ActionDiscard      ReviewAction = "Discard"
 	ActionSave         ReviewAction = "Save changes (keep unreviewed)"
 	ActionSaveReviewed ReviewAction = "Save & Mark Reviewed"
+	ActionSplit        ReviewAction = "Split via Receipt Matcher"
 )
 
 type ReviewResult struct {
@@ -25,6 +29,7 @@ type ReviewResult struct {
 	Tags     []string
 	Memo     string
 	Action   ReviewAction
+	Splits   []model.Transaction
 }
 
 type ReviewFinishedMsg struct {
@@ -79,6 +84,10 @@ type ReviewModel struct {
 	addingNew     bool
 	addingNewType string
 	newInput      textinput.Model
+
+	askingCSVPath bool
+	filePicker    filepicker.Model
+	statusMsg     string
 
 	selectedCategory string
 	selectedTags     map[string]bool
@@ -172,6 +181,12 @@ func NewReviewModel(tx model.Transaction, categories []string, tags []string, su
 	m.newInput = textinput.New()
 	m.newInput.Width = 30
 
+	fp := filepicker.New()
+	fp.AllowedTypes = []string{".csv"}
+	fp.CurrentDirectory, _ = os.Getwd()
+	fp.SetHeight(10)
+	m.filePicker = fp
+
 	m.updateSizes()
 	m.updateFocus()
 	return m
@@ -206,12 +221,78 @@ func (m *ReviewModel) updateFocus() {
 }
 
 func (m *ReviewModel) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, m.filePicker.Init())
 }
 
 func (m *ReviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
+
+	if m.askingCSVPath {
+		var cmd tea.Cmd
+		m.filePicker, cmd = m.filePicker.Update(msg)
+
+		if didSelect, path := m.filePicker.DidSelectFile(msg); didSelect {
+			matcher, err := importer.NewAmazonPrivacyCSVMatcher(path)
+			if err != nil {
+				m.statusMsg = fmt.Sprintf("Error loading CSV: %v", err)
+				m.askingCSVPath = false
+				return m, nil
+			}
+			items, matched, err := matcher.Match(m.Tx.Memo, m.Tx.Date)
+			if err != nil || !matched {
+				m.statusMsg = "No matching items found in CSV."
+				m.askingCSVPath = false
+				return m, nil
+			}
+
+			var splits []model.Transaction
+			var sum int64
+			for i, it := range items {
+				splits = append(splits, model.Transaction{
+					ID:              fmt.Sprintf("%s-split-%d", m.Tx.ID, i),
+					Date:            m.Tx.Date,
+					Payee:           m.Tx.Payee,
+					AmountCents:     it.AmountCents,
+					Currency:        m.Tx.Currency,
+					Memo:            it.Title,
+					IsReviewed:      false,
+					ArchiveFilePath: m.Tx.ArchiveFilePath,
+				})
+				sum += it.AmountCents
+			}
+
+			if sum != m.Tx.AmountCents {
+				splits = append(splits, model.Transaction{
+					ID:              fmt.Sprintf("%s-split-remainder", m.Tx.ID),
+					Date:            m.Tx.Date,
+					Payee:           m.Tx.Payee,
+					AmountCents:     m.Tx.AmountCents - sum,
+					Currency:        m.Tx.Currency,
+					Memo:            "Shipping / Tax / Remainder",
+					IsReviewed:      false,
+					ArchiveFilePath: m.Tx.ArchiveFilePath,
+				})
+			}
+
+			return m, func() tea.Msg {
+				return ReviewFinishedMsg{
+					Result: &ReviewResult{
+						Action: ActionSplit,
+						Splits: splits,
+					},
+				}
+			}
+		}
+
+		if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.String() == "esc" {
+			m.askingCSVPath = false
+			return m, nil
+		}
+
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
+	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -284,6 +365,7 @@ func (m *ReviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(cmds...)
 		}
 
+
 		if m.editingMemo {
 			switch msg.String() {
 			case "esc", "enter":
@@ -307,6 +389,10 @@ func (m *ReviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "m":
+			m.askingCSVPath = true
+			m.filePicker.CurrentDirectory, _ = os.Getwd()
+			return m, m.filePicker.Init()
 		case "n":
 			if m.focusedPane == PaneCategory && m.catList.FilterState() != list.Filtering {
 				m.addingNew = true
@@ -414,6 +500,20 @@ func (m *ReviewModel) View() string {
 		return overlay
 	}
 
+	if m.askingCSVPath {
+		dialogBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(1, 2).
+			Render("Select Amazon Privacy CSV File:\n\n" + m.filePicker.View())
+
+		overlay := lipgloss.Place(m.width, m.height,
+			lipgloss.Center, lipgloss.Center,
+			dialogBox,
+		)
+		return overlay
+	}
+
 	if m.focusedPane == PaneExit {
 		dialogBox := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -441,13 +541,20 @@ func (m *ReviewModel) View() string {
 		if m.focusedPane == PaneTop {
 			buttonStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("62")).Padding(0, 1)
 		}
+
+		status := ""
+		if m.statusMsg != "" {
+			status = "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(m.statusMsg)
+		}
+
 		topContent = fmt.Sprintf(
-			"Date:   %s\nPayee:  %s\nAmount: %.2f %s\nMemo:   %s\n\n%s",
+			"Date:   %s\nPayee:  %s\nAmount: %.2f %s\nMemo:   %s%s\n\n%s",
 			m.Tx.Date.Format("2006-01-02"),
 			m.Tx.Payee,
 			float64(m.Tx.AmountCents)/100.0,
 			m.Tx.Currency,
 			m.memo,
+			status,
 			buttonStyle.Render("[ Edit Memo ]"),
 		)
 	}
@@ -469,7 +576,7 @@ func (m *ReviewModel) View() string {
 	bottom := lipgloss.JoinHorizontal(lipgloss.Top, bottomLeft, bottomRight)
 	formView := lipgloss.JoinVertical(lipgloss.Left, topView, bottom)
 
-	helpText := "\n[tab] Switch Pane • [enter] Select/Action • [esc] Exit Options • [/] Filter"
+	helpText := "\n[tab] Switch Pane • [enter] Select/Action • [esc] Exit Options • [/] Filter • [m] Receipt Matcher"
 	if m.editingMemo {
 		helpText = "\n[enter/esc] Done Editing"
 	}

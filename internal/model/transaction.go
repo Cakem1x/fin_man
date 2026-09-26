@@ -15,4 +15,5 @@ type Transaction struct {
 	CategoryName    *string // Hydrated for convenience
 	Tags            []Tag   // Hydrated many-to-many relationship
 	IsReviewed      bool    // Indicates if the transaction has been reviewed by the user
+	ParentID        *string // Foreign key to the parent transaction (if this is a split child)
 }

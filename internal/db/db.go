@@ -47,7 +47,7 @@ func (db *DB) InsertTransactions(ctx context.Context, txs []model.Transaction) (
 	defer func() { _ = stmt.Close() }()
 
 	selectStmt, err := tx.PrepareContext(ctx, `
-		SELECT id, date, payee, amount_cents, currency, memo, archive_file_path, is_reviewed
+		SELECT id, date, payee, amount_cents, currency, memo, archive_file_path, is_reviewed, parent_id
 		FROM transactions
 		WHERE id = ?
 	`)
@@ -74,7 +74,7 @@ func (db *DB) InsertTransactions(ctx context.Context, txs []model.Transaction) (
 		} else {
 			row := selectStmt.QueryRowContext(ctx, t.ID)
 			var existing model.Transaction
-			err := row.Scan(&existing.ID, &existing.Date, &existing.Payee, &existing.AmountCents, &existing.Currency, &existing.Memo, &existing.ArchiveFilePath, &existing.IsReviewed)
+			err := row.Scan(&existing.ID, &existing.Date, &existing.Payee, &existing.AmountCents, &existing.Currency, &existing.Memo, &existing.ArchiveFilePath, &existing.IsReviewed, &existing.ParentID)
 			if err != nil {
 				return 0, nil, fmt.Errorf("failed to fetch existing transaction %s: %w", t.ID, err)
 			}
@@ -99,10 +99,10 @@ func (db *DB) InsertTransactions(ctx context.Context, txs []model.Transaction) (
 // GetUnreviewedTransactions fetches transactions that have not been reviewed.
 func (db *DB) GetUnreviewedTransactions(ctx context.Context) ([]model.Transaction, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, t.is_reviewed, c.name
+		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, t.is_reviewed, t.parent_id, c.name
 		FROM transactions t
 		LEFT JOIN categories c ON t.category_id = c.id
-		WHERE t.is_reviewed = 0
+		WHERE t.is_reviewed = 0 AND NOT EXISTS (SELECT 1 FROM transactions child WHERE child.parent_id = t.id)
 		ORDER BY t.date ASC
 	`)
 	if err != nil {
@@ -113,7 +113,7 @@ func (db *DB) GetUnreviewedTransactions(ctx context.Context) ([]model.Transactio
 	var txs []model.Transaction
 	for rows.Next() {
 		var t model.Transaction
-		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.CategoryName); err != nil {
+		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.ParentID, &t.CategoryName); err != nil {
 			return nil, fmt.Errorf("scan failed: %w", err)
 		}
 		txs = append(txs, t)
@@ -234,9 +234,10 @@ func (db *DB) EnrichTransaction(ctx context.Context, txID string, categoryName s
 // GetAllTransactions fetches all transactions, both categorized and uncategorized.
 func (db *DB) GetAllTransactions(ctx context.Context) ([]model.Transaction, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, t.is_reviewed, c.name
+		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, t.is_reviewed, t.parent_id, c.name
 		FROM transactions t
 		LEFT JOIN categories c ON t.category_id = c.id
+		WHERE NOT EXISTS (SELECT 1 FROM transactions child WHERE child.parent_id = t.id)
 		ORDER BY t.date ASC
 	`)
 	if err != nil {
@@ -247,7 +248,7 @@ func (db *DB) GetAllTransactions(ctx context.Context) ([]model.Transaction, erro
 	var txs []model.Transaction
 	for rows.Next() {
 		var t model.Transaction
-		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.CategoryName); err != nil {
+		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.ParentID, &t.CategoryName); err != nil {
 			return nil, fmt.Errorf("scan failed: %w", err)
 		}
 		txs = append(txs, t)
@@ -261,9 +262,10 @@ func (db *DB) GetAllTransactions(ctx context.Context) ([]model.Transaction, erro
 // GetCategorizedTransactions fetches transactions that have a category assigned.
 func (db *DB) GetCategorizedTransactions(ctx context.Context) ([]model.Transaction, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, t.is_reviewed, c.name
+		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, t.is_reviewed, t.parent_id, c.name
 		FROM transactions t
 		JOIN categories c ON t.category_id = c.id
+		WHERE NOT EXISTS (SELECT 1 FROM transactions child WHERE child.parent_id = t.id)
 		ORDER BY t.date ASC
 	`)
 	if err != nil {
@@ -274,7 +276,7 @@ func (db *DB) GetCategorizedTransactions(ctx context.Context) ([]model.Transacti
 	var txs []model.Transaction
 	for rows.Next() {
 		var t model.Transaction
-		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.CategoryName); err != nil {
+		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.ParentID, &t.CategoryName); err != nil {
 			return nil, fmt.Errorf("scan failed: %w", err)
 		}
 
@@ -337,6 +339,37 @@ func (db *DB) DeleteCategories(ctx context.Context, names []string) error {
 	for _, name := range names {
 		if _, err := stmt.ExecContext(ctx, name); err != nil {
 			return fmt.Errorf("failed to delete category %q: %w", name, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit tx: %w", err)
+	}
+
+	return nil
+}
+
+// SplitTransaction marks a parent transaction as superseded by inserting its children.
+func (db *DB) SplitTransaction(ctx context.Context, parentID string, children []model.Transaction) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO transactions (id, date, payee, amount_cents, currency, memo, archive_file_path, is_reviewed, parent_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, child := range children {
+		_, err := stmt.ExecContext(ctx, child.ID, child.Date, child.Payee, child.AmountCents, child.Currency, child.Memo, child.ArchiveFilePath, child.IsReviewed, parentID)
+		if err != nil {
+			return fmt.Errorf("failed to insert child transaction %s: %w", child.ID, err)
 		}
 	}
 
