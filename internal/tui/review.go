@@ -37,6 +37,9 @@ type ReviewFinishedMsg struct {
 	Result *ReviewResult
 }
 
+// ReviewClosedMsg closes the review form without applying its draft.
+type ReviewClosedMsg struct{}
+
 type ReviewPane int
 
 const (
@@ -270,6 +273,50 @@ func (m *ReviewModel) Init() tea.Cmd {
 	return tea.Batch(textinput.Blink, m.filePicker.Init())
 }
 
+// HasPendingChanges reports whether the editable draft differs from the
+// transaction that opened this form. Suggestions are part of the draft too.
+func (m *ReviewModel) HasPendingChanges() bool {
+	return BuildTransactionDiff(m.Tx, m.draftTransaction()).HasChanges()
+}
+
+func (m *ReviewModel) draftTransaction() model.Transaction {
+	draft := m.Tx
+	draft.Memo = m.memo
+	draft.CategoryName = nil
+	if m.selectedCategory != "" {
+		category := m.selectedCategory
+		draft.CategoryName = &category
+	}
+	draft.Tags = nil
+	for _, name := range selectedTagNames(m.selectedTags) {
+		draft.Tags = append(draft.Tags, model.Tag{Name: name})
+	}
+	return draft
+}
+
+func (m *ReviewModel) exitDiff() TransactionDiff {
+	item, ok := m.exitList.SelectedItem().(selectableItem)
+	if ok {
+		return m.exitDiffForAction(ReviewAction(item.id))
+	}
+	return m.exitDiffForAction("")
+}
+
+func (m *ReviewModel) exitDiffForAction(action ReviewAction) TransactionDiff {
+	if action == ActionDiscard {
+		return TransactionDiff{}
+	}
+
+	draft := m.draftTransaction()
+	switch action {
+	case ActionSaveReviewed:
+		draft.IsReviewed = true
+	case ActionSave:
+		draft.IsReviewed = false
+	}
+	return BuildTransactionDiff(m.Tx, draft)
+}
+
 func (m *ReviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
@@ -481,6 +528,9 @@ func (m *ReviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.tagList.ResetFilter()
 				return m, nil
 			}
+			if !m.HasPendingChanges() {
+				return m, func() tea.Msg { return ReviewClosedMsg{} }
+			}
 			m.focusedPane = PaneExit
 			m.updateFocus()
 			return m, nil
@@ -548,6 +598,27 @@ func (m *ReviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func (m *ReviewModel) exitDialog() string {
+	dialogContentWidth := lipgloss.Width(m.exitList.View())
+	for _, action := range []ReviewAction{ActionSaveReviewed, ActionSave, ActionDiscard} {
+		width := lipgloss.Width("Draft transaction changes:")
+		for _, line := range strings.Split(m.exitDiffForAction(action).String(), "\n") {
+			if lineWidth := lipgloss.Width(line); lineWidth > width {
+				width = lineWidth
+			}
+		}
+		if width > dialogContentWidth {
+			dialogContentWidth = width
+		}
+	}
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		Padding(1, 2).
+		Width(dialogContentWidth).
+		Render("Draft transaction changes:\n" + m.exitDiff().String() + "\n\n" + m.exitList.View())
+}
+
 func (m *ReviewModel) View() string {
 	if m.addingNew {
 		dialogBox := lipgloss.NewStyle().
@@ -578,12 +649,7 @@ func (m *ReviewModel) View() string {
 	}
 
 	if m.focusedPane == PaneExit {
-		dialogBox := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("62")).
-			Padding(1, 2).
-			Render(m.exitList.View())
-
+		dialogBox := m.exitDialog()
 		overlay := lipgloss.Place(m.width, m.height,
 			lipgloss.Center, lipgloss.Center,
 			dialogBox,

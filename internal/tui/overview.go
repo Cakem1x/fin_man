@@ -318,6 +318,11 @@ func (m *OverviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.saveReview(msg.Result)
+	case ReviewClosedMsg:
+		m.reviewingTx = false
+		m.reviewModel = nil
+		m.reviewingID = ""
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
