@@ -124,8 +124,12 @@ func NewReviewModel(tx model.Transaction, categories []string, tags []string, su
 		}
 	}
 
-	// Auto-select top category if its score > 0.8.
-	if suggestion != nil && len(suggestion.CategoryScores) > 0 && suggestion.CategoryScores[0].Score > 0.8 {
+	// Existing transaction values take precedence over suggestions so opening
+	// and saving without edits preserves the transaction's current state.
+	hasExistingEnrichment := tx.CategoryName != nil || len(tx.Tags) > 0
+	if tx.CategoryName != nil {
+		m.selectedCategory = *tx.CategoryName
+	} else if !hasExistingEnrichment && suggestion != nil && len(suggestion.CategoryScores) > 0 && suggestion.CategoryScores[0].Score > 0.8 {
 		m.selectedCategory = suggestion.CategoryScores[0].CategoryName
 	}
 
@@ -134,8 +138,8 @@ func NewReviewModel(tx model.Transaction, categories []string, tags []string, su
 		m.selectedTags[t.Name] = true
 	}
 
-	// Auto-select tags with score > 0.8.
-	if suggestion != nil {
+	// Suggestions are defaults only when the transaction has no saved tags.
+	if !hasExistingEnrichment && suggestion != nil {
 		for _, ts := range suggestion.TagScores {
 			if ts.Score > 0.8 {
 				m.selectedTags[ts.TagName] = true
