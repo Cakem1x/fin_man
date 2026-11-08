@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -233,6 +235,15 @@ func (db *DB) GetAllTags(ctx context.Context) ([]model.Tag, error) {
 	return tags, rows.Err()
 }
 
+// newID returns a random ID for a new category or tag.
+func newID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate id: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
 // EnrichTransaction updates a transaction with a category, tags, and memo.
 // It creates the category and tags if they do not exist.
 func (db *DB) EnrichTransaction(ctx context.Context, txID string, categoryName string, tagNames []string, memo string, isReviewed bool) error {
@@ -244,15 +255,11 @@ func (db *DB) EnrichTransaction(ctx context.Context, txID string, categoryName s
 
 	var categoryID *string
 	if categoryName != "" {
-		// Insert category if it doesn't exist (assuming UUID or we can just use the name as ID to be simple).
-		// Wait, the migration specifies `id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL`.
-		// Let's use the name as the ID to avoid needing a UUID generator, or if we use UUID, we'd need google/uuid.
-		// Since we don't know if google/uuid is used, using the name as the ID is the simplest for categories.
-		// Let's check model.go to see if ID is defined. Actually, just using Name as ID for now, or generating one.
-		// Let's use name as ID for simplicity and deduplication, but we'll do lowercase or something.
-		// Actually, let's just use the name as the ID directly.
-		catID := categoryName
-		_, err := tx.ExecContext(ctx, "INSERT INTO categories (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING", catID, categoryName)
+		catID, err := newID()
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "INSERT INTO categories (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING", catID, categoryName)
 		if err != nil {
 			return fmt.Errorf("failed to upsert category: %w", err)
 		}
@@ -281,8 +288,11 @@ func (db *DB) EnrichTransaction(ctx context.Context, txID string, categoryName s
 		if tagName == "" {
 			continue
 		}
-		tagID := tagName
-		_, err := tx.ExecContext(ctx, "INSERT INTO tags (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING", tagID, tagName)
+		tagID, err := newID()
+		if err != nil {
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "INSERT INTO tags (id, name) VALUES (?, ?) ON CONFLICT(name) DO NOTHING", tagID, tagName)
 		if err != nil {
 			return fmt.Errorf("failed to upsert tag %q: %w", tagName, err)
 		}

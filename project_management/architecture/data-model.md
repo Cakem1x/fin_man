@@ -21,6 +21,8 @@ Mutually exclusive classification. Nested categories use `/` in the name (e.g. `
 
 Reusable labels. `transaction_tags` links tags to transactions.
 
+Category and tag IDs are opaque strings. New IDs are random. Renaming does not change the ID.
+
 ### transaction_embeddings
 
 Cached embedding vectors per transaction and model (see [categorization](categorization.md)).
