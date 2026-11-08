@@ -197,7 +197,7 @@ func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB) OverviewM
 		tagNames[i] = tg.Name
 	}
 
-	categorizedTxs, _ := dbConn.GetCategorizedTransactions(ctx)
+	categorizedTxs, _ := dbConn.ListTransactions(ctx, db.Filter{ExcludeUncategorized: true})
 	estimator := categorize.NewEstimator(categorizedTxs)
 
 	m := OverviewModel{
@@ -240,7 +240,7 @@ func (m *OverviewModel) saveReview(res *ReviewResult) (tea.Model, tea.Cmd) {
 		if err != nil {
 			log.Printf("failed to split transaction %s: %v", m.reviewingID, err)
 		} else {
-			m.transactions, _ = m.dbConn.GetAllTransactions(ctx)
+			m.transactions, _ = m.dbConn.ListTransactions(ctx, db.Filter{})
 		}
 	} else {
 		markReviewed := res.Action == ActionSaveReviewed

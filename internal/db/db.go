@@ -97,34 +97,6 @@ func (db *DB) InsertTransactions(ctx context.Context, txs []model.Transaction) (
 	return insertedCount, nil, nil
 }
 
-// GetUnreviewedTransactions fetches transactions that have not been reviewed.
-func (db *DB) GetUnreviewedTransactions(ctx context.Context) ([]model.Transaction, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, t.is_reviewed, t.parent_id, c.name
-		FROM transactions t
-		LEFT JOIN categories c ON t.category_id = c.id
-		WHERE t.is_reviewed = 0 AND NOT EXISTS (SELECT 1 FROM transactions child WHERE child.parent_id = t.id)
-		ORDER BY t.date ASC
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("query failed: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var txs []model.Transaction
-	for rows.Next() {
-		var t model.Transaction
-		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.ParentID, &t.CategoryName); err != nil {
-			return nil, fmt.Errorf("scan failed: %w", err)
-		}
-		txs = append(txs, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return db.hydrateTags(ctx, txs)
-}
-
 func (db *DB) GetAllCategories(ctx context.Context) ([]model.Category, error) {
 	rows, err := db.QueryContext(ctx, "SELECT id, name FROM categories ORDER BY name ASC")
 	if err != nil {
@@ -167,7 +139,8 @@ func (db *DB) RenameCategory(ctx context.Context, oldPath, newName string) error
 		parent = oldPath[:idx+1]
 	}
 	newPath := parent + newName
-	rows, err := tx.QueryContext(ctx, "SELECT id, name FROM categories")
+	cond, args := categoryPathCondition("name", oldPath)
+	rows, err := tx.QueryContext(ctx, "SELECT id, name FROM categories WHERE "+cond, args...)
 	if err != nil {
 		return fmt.Errorf("failed to find nested categories: %w", err)
 	}
@@ -178,9 +151,6 @@ func (db *DB) RenameCategory(ctx context.Context, oldPath, newName string) error
 		if err := rows.Scan(&r.id, &r.old); err != nil {
 			_ = rows.Close()
 			return err
-		}
-		if r.old != oldPath && !strings.HasPrefix(r.old, oldPath+"/") {
-			continue
 		}
 		r.next = newPath + strings.TrimPrefix(r.old, oldPath)
 		renames = append(renames, r)
@@ -229,25 +199,10 @@ func (db *DB) DeleteEmptyCategory(ctx context.Context, name string) error {
 	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM transactions WHERE category_id = ?", id).Scan(&assigned); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT name FROM categories")
-	if err != nil {
+	cond, args := categoryPathCondition("name", name)
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM categories WHERE id != ? AND "+cond, append([]any{id}, args...)...).Scan(&children); err != nil {
 		return err
 	}
-	for rows.Next() {
-		var childName string
-		if err := rows.Scan(&childName); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		if strings.HasPrefix(childName, name+"/") {
-			children++
-		}
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
-	}
-	_ = rows.Close()
 	if assigned > 0 {
 		return fmt.Errorf("category %q is used by %d transaction(s)", name, assigned)
 	}
@@ -346,124 +301,6 @@ func (db *DB) EnrichTransaction(ctx context.Context, txID string, categoryName s
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit tx: %w", err)
 	}
-	return nil
-}
-
-// GetAllTransactions fetches all transactions, both categorized and uncategorized.
-func (db *DB) GetAllTransactions(ctx context.Context) ([]model.Transaction, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, t.is_reviewed, t.parent_id, c.name
-		FROM transactions t
-		LEFT JOIN categories c ON t.category_id = c.id
-		WHERE NOT EXISTS (SELECT 1 FROM transactions child WHERE child.parent_id = t.id)
-		ORDER BY t.date ASC
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("query failed: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var txs []model.Transaction
-	for rows.Next() {
-		var t model.Transaction
-		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.ParentID, &t.CategoryName); err != nil {
-			return nil, fmt.Errorf("scan failed: %w", err)
-		}
-		txs = append(txs, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return db.hydrateTags(ctx, txs)
-}
-
-// GetCategorizedTransactions fetches transactions that have a category assigned.
-func (db *DB) GetCategorizedTransactions(ctx context.Context) ([]model.Transaction, error) {
-	rows, err := db.QueryContext(ctx, `
-		SELECT t.id, t.date, t.payee, t.amount_cents, t.currency, t.memo, t.archive_file_path, t.category_id, t.is_reviewed, t.parent_id, c.name
-		FROM transactions t
-		JOIN categories c ON t.category_id = c.id
-		WHERE NOT EXISTS (SELECT 1 FROM transactions child WHERE child.parent_id = t.id)
-		ORDER BY t.date ASC
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("query failed: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var txs []model.Transaction
-	for rows.Next() {
-		var t model.Transaction
-		if err := rows.Scan(&t.ID, &t.Date, &t.Payee, &t.AmountCents, &t.Currency, &t.Memo, &t.ArchiveFilePath, &t.CategoryID, &t.IsReviewed, &t.ParentID, &t.CategoryName); err != nil {
-			return nil, fmt.Errorf("scan failed: %w", err)
-		}
-
-		txs = append(txs, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return db.hydrateTags(ctx, txs)
-}
-
-func (db *DB) hydrateTags(ctx context.Context, txs []model.Transaction) ([]model.Transaction, error) {
-	if len(txs) == 0 {
-		return txs, nil
-	}
-
-	txIdxMap := make(map[string]int)
-	for i, tx := range txs {
-		txIdxMap[tx.ID] = i
-	}
-
-	rows, err := db.QueryContext(ctx, `
-		SELECT tt.transaction_id, t.id, t.name
-		FROM transaction_tags tt
-		JOIN tags t ON tt.tag_id = t.id
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("query tags failed: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	for rows.Next() {
-		var txID, tagID, tagName string
-		if err := rows.Scan(&txID, &tagID, &tagName); err != nil {
-			return nil, fmt.Errorf("scan tag failed: %w", err)
-		}
-
-		if idx, exists := txIdxMap[txID]; exists {
-			txs[idx].Tags = append(txs[idx].Tags, model.Tag{ID: tagID, Name: tagName})
-		}
-	}
-
-	return txs, rows.Err()
-}
-
-// DeleteCategories removes the specified categories from the database.
-func (db *DB) DeleteCategories(ctx context.Context, names []string) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	stmt, err := tx.PrepareContext(ctx, "DELETE FROM categories WHERE name = ?")
-	if err != nil {
-		return fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	defer func() { _ = stmt.Close() }()
-
-	for _, name := range names {
-		if _, err := stmt.ExecContext(ctx, name); err != nil {
-			return fmt.Errorf("failed to delete category %q: %w", name, err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit tx: %w", err)
-	}
-
 	return nil
 }
 

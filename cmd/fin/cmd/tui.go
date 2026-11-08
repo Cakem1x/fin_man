@@ -48,7 +48,7 @@ var tuiCmd = &cobra.Command{
 		}()
 
 		// Fetch all transactions to allow memory-based dynamic filtering
-		txs, err := dbConn.GetAllTransactions(ctx)
+		txs, err := dbConn.ListTransactions(ctx, db.Filter{})
 		if err != nil {
 			return fmt.Errorf("failed to fetch transactions: %w", err)
 		}
