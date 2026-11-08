@@ -8,8 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Cakem1x/fin_man/internal/categorize"
-	"github.com/Cakem1x/fin_man/internal/db"
+	"github.com/Cakem1x/fin_man/internal/app"
 	"github.com/Cakem1x/fin_man/internal/model"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/table"
@@ -132,7 +131,7 @@ type catNode struct {
 }
 
 type OverviewModel struct {
-	dbConn       *db.DB
+	svc          *app.Service
 	transactions []model.Transaction
 	filter       timeFilter
 
@@ -149,9 +148,6 @@ type OverviewModel struct {
 	// Review form overlay
 	reviewingTx      bool
 	reviewingID      string
-	categories       []string
-	tags             []string
-	estimator        *categorize.Estimator
 	reviewModel      *ReviewModel
 	renamingCategory bool
 	renameInput      textinput.Model
@@ -162,9 +158,7 @@ type OverviewModel struct {
 	height int
 }
 
-// NewOverviewModel creates the overview. embeddings holds cached transaction
-// vectors for the estimator and may be nil.
-func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB, embeddings map[string][]float32) OverviewModel {
+func NewOverviewModel(svc *app.Service) OverviewModel {
 	// Setup list
 	l := list.New([]list.Item{}, getListDelegate(true), 0, 0)
 	l.Title = "Categories"
@@ -186,32 +180,13 @@ func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB, embedding
 	)
 	t.SetStyles(getTableStyles(false))
 
-	ctx := context.Background()
-	cats, _ := dbConn.GetAllCategories(ctx)
-	catNames := make([]string, len(cats))
-	for i, c := range cats {
-		catNames[i] = c.Name
-	}
-
-	tags, _ := dbConn.GetAllTags(ctx)
-	tagNames := make([]string, len(tags))
-	for i, tg := range tags {
-		tagNames[i] = tg.Name
-	}
-
-	categorizedTxs, _ := dbConn.ListTransactions(ctx, db.Filter{ExcludeUncategorized: true})
-	estimator := categorize.NewEstimator(categorizedTxs, categorize.WithEmbeddings(embeddings))
-
 	m := OverviewModel{
-		dbConn:       dbConn,
-		transactions: transactions,
+		svc:          svc,
+		transactions: svc.Transactions(),
 		filter:       filterAllTime,
 		catList:      l,
 		txTable:      t,
 		activePane:   0,
-		categories:   catNames,
-		tags:         tagNames,
-		estimator:    estimator,
 	}
 	m.renameInput = textinput.New()
 	m.renameInput.Width = 36
@@ -224,9 +199,9 @@ func (m *OverviewModel) Init() tea.Cmd {
 }
 
 func (m *OverviewModel) openReviewForm(tx model.Transaction) tea.Cmd {
-	suggestion := m.estimator.Estimate(tx)
+	suggestion := m.svc.Suggest(tx)
 
-	rm := NewReviewModel(tx, m.categories, m.tags, suggestion, m.width, m.height)
+	rm := NewReviewModel(tx, m.svc.Categories(), m.svc.Tags(), suggestion, m.width, m.height)
 	m.reviewModel = &rm
 	m.reviewingID = tx.ID
 	m.reviewingTx = true
@@ -238,61 +213,16 @@ func (m *OverviewModel) saveReview(res *ReviewResult) (tea.Model, tea.Cmd) {
 	ctx := context.Background()
 
 	if res.Action == ActionSplit {
-		err := m.dbConn.SplitTransaction(ctx, m.reviewingID, res.Splits)
-		if err != nil {
+		if err := m.svc.Split(ctx, m.reviewingID, res.Splits); err != nil {
 			log.Printf("failed to split transaction %s: %v", m.reviewingID, err)
-		} else {
-			m.transactions, _ = m.dbConn.ListTransactions(ctx, db.Filter{})
 		}
 	} else {
-		markReviewed := res.Action == ActionSaveReviewed
-		err := m.dbConn.EnrichTransaction(ctx, m.reviewingID, res.Category, res.Tags, res.Memo, markReviewed)
-		if err != nil {
+		reviewed := res.Action == ActionSaveReviewed
+		if err := m.svc.ApplyReview(ctx, m.reviewingID, res.Category, res.Tags, res.Memo, reviewed); err != nil {
 			log.Printf("failed to save transaction %s: %v", m.reviewingID, err)
-		} else {
-			if res.Category != "" {
-				found := false
-				for _, c := range m.categories {
-					if c == res.Category {
-						found = true
-						break
-					}
-				}
-				if !found {
-					m.categories = append(m.categories, res.Category)
-				}
-			}
-			for _, t := range res.Tags {
-				if t == "" {
-					continue
-				}
-				found := false
-				for _, existing := range m.tags {
-					if existing == t {
-						found = true
-						break
-					}
-				}
-				if !found {
-					m.tags = append(m.tags, t)
-				}
-			}
-			txs, err := m.dbConn.ListTransactions(ctx, db.Filter{})
-			if err != nil {
-				log.Printf("failed to reload transactions: %v", err)
-			} else {
-				m.transactions = txs
-			}
-			if markReviewed && res.Category != "" {
-				for _, t := range m.transactions {
-					if t.ID == m.reviewingID {
-						m.estimator.Learn(t)
-						break
-					}
-				}
-			}
 		}
 	}
+	m.transactions = m.svc.Transactions()
 	m.reviewingTx = false
 	m.updateData()
 	return m, nil
@@ -355,28 +285,12 @@ func (m *OverviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.categoryMessage = ""
 				return m, nil
 			case "enter":
-				oldPath := m.renamePath
-				newName := strings.TrimSpace(m.renameInput.Value())
-				if err := m.dbConn.RenameCategory(context.Background(), oldPath, newName); err != nil {
+				newPath, err := m.svc.RenameCategory(context.Background(), m.renamePath, m.renameInput.Value())
+				if err != nil {
 					m.categoryMessage = err.Error()
 					return m, nil
 				}
-				oldLeaf := oldPath
-				if idx := strings.LastIndex(oldLeaf, "/"); idx >= 0 {
-					oldLeaf = oldLeaf[idx+1:]
-				}
-				newPath := strings.TrimSuffix(oldPath, oldLeaf) + newName
-				for i := range m.categories {
-					if m.categories[i] == oldPath || strings.HasPrefix(m.categories[i], oldPath+"/") {
-						m.categories[i] = newPath + strings.TrimPrefix(m.categories[i], oldPath)
-					}
-				}
-				for i := range m.transactions {
-					if m.transactions[i].CategoryName != nil && (*m.transactions[i].CategoryName == oldPath || strings.HasPrefix(*m.transactions[i].CategoryName, oldPath+"/")) {
-						name := newPath + strings.TrimPrefix(*m.transactions[i].CategoryName, oldPath)
-						m.transactions[i].CategoryName = &name
-					}
-				}
+				m.transactions = m.svc.Transactions()
 				m.renamingCategory = false
 				m.categoryMessage = ""
 				m.updateData()
@@ -418,15 +332,9 @@ func (m *OverviewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "d":
 			if m.activePane == 0 {
 				if item, ok := m.catList.SelectedItem().(categoryItem); ok && !item.isUnreviewed && !item.isSeparator {
-					if err := m.dbConn.DeleteEmptyCategory(context.Background(), item.fullPath); err != nil {
+					if err := m.svc.DeleteCategory(context.Background(), item.fullPath); err != nil {
 						m.categoryMessage = err.Error()
 						return m, nil
-					}
-					for i, category := range m.categories {
-						if category == item.fullPath {
-							m.categories = append(m.categories[:i], m.categories[i+1:]...)
-							break
-						}
 					}
 					parentPath := "__unreviewed__"
 					if slash := strings.LastIndex(item.fullPath, "/"); slash >= 0 {
@@ -576,7 +484,7 @@ func (m *OverviewModel) updateData() {
 		return currentNode
 	}
 
-	for _, c := range m.categories {
+	for _, c := range m.svc.Categories() {
 		getOrAddNode(c)
 	}
 
