@@ -12,7 +12,7 @@ To maintain a strict audit trail and comply with the principle that "raw imports
 
 - **`transactions` table (`parent_id`)**: A foreign key pointing back to another transaction.
 - **Immutability**: When a transaction is split, the original transaction is not deleted or overwritten. Instead, the new line items are inserted into the database with their `parent_id` set to the ID of the original bank transaction.
-- **Visibility**: Queries filtering for active transactions (like `GetUnreviewedTransactions` or `GetAllTransactions`) automatically hide any transaction that acts as a parent (`WHERE NOT EXISTS (SELECT 1 FROM transactions child WHERE child.parent_id = t.id)`). This cleanly encapsulates the "hidden" state inside relational logic without requiring an explicit boolean toggle.
+- **Visibility**: `ListTransactions` automatically hides any transaction that acts as a parent (`WHERE NOT EXISTS (SELECT 1 FROM transactions child WHERE child.parent_id = t.id)`). This cleanly encapsulates the "hidden" state inside relational logic without requiring an explicit boolean toggle.
 - **Handling Mismatches**: If the sum of the exact line-item amounts does not equal the bank transaction amount (e.g., due to shipping or taxes not captured in the item lines), the system automatically creates a "Remainder" child transaction to ensure the budget balances perfectly.
 
 ## TUI Workflow
