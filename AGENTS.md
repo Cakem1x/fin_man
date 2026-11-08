@@ -13,14 +13,28 @@ Final test, use sparsely. Only before finishing the task:
 
 If you are already inside a `direnv` environment where `use flake` is active, you can simply run the `just <recipe>` commands directly.
 
-## How to Integrate Tests Into Development
-### Which Tests to add
-Add concise tests for features and regression tests for bugs, when possible.
-Avoid adding tests that lock in implementation details.
-Only things that are essential for the program's logic or part of the intended contract of a function shall be tested.
-One exception: Using tests to drive the development workflow of complex implementation details is good practice, but keep these tests separate from those that test the 'public' interface.
+## Documentation
+When adding comments or docs, ensure to use technical writing best practices.
+- Short, concise sentences
+- Exactly the same term to the same thing, always
+- No marketing
 
-### How to add Tests
-Whenever possible, start by adding tests and verify that they fail.
-Then, adapt code and check that they pass.
-This helps ensuring tests actually test what you want to test.
+Generally, avoid adding superfluous documentation.
+Before adding comments, consider whether refactoring could replace the need for a comment.
+
+Make sure that a thing is documented at one location only, to avoid running into inconsistent documentation later.
+
+## Tests
+
+### How to add Tests: Test driven development (TDD)
+Do not add tests that succeed after implementation is done.
+Instead, tests need to be added beforehand and need to fail.
+This verifies that the test is correctly testing what we want it to test
+
+### What to test
+100% coverage is not a goal. Use tests as a tool to
+- drive development (TDD)
+- and to document and protect from regressions important structure / interfaces
+
+Do not add tests for implementation details of a function.
+If logic is sufficiently complex to warrent tests (TDD), move that functionality into a separate function that can be tested properly.
