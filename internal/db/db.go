@@ -15,8 +15,9 @@ type DB struct {
 }
 
 func Open(dbPath string) (*DB, error) {
-	// Enable Write-Ahead Logging for better concurrency/resilience
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	// Enable Write-Ahead Logging for better concurrency/resilience.
+	// SQLite enforces foreign keys only per connection, so the DSN enables them.
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1")
 	if err != nil {
 		return nil, err
 	}
