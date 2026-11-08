@@ -42,6 +42,11 @@ func NewManager(workspaceDir string) *Manager {
 	return &Manager{WorkspaceDir: workspaceDir}
 }
 
+// DBPath returns the path of the finance database inside the mounted store.
+func (m *Manager) DBPath() string {
+	return filepath.Join(m.WorkspaceDir, "store", "finance.db")
+}
+
 func (m *Manager) runGocryptfs(args []string, password string) error {
 	f, err := os.CreateTemp("", "gocryptfs-pass-*")
 	if err != nil {
