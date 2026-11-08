@@ -36,3 +36,22 @@ func GenerateHash(tx model.Transaction) string {
 	hasher.Write([]byte(payload))
 	return hex.EncodeToString(hasher.Sum(nil))
 }
+
+// SplitIdentical separates transactions that share an ID within one slice.
+// unique keeps the first transaction per ID, in input order.
+// identical holds one group per repeated ID, with all transactions of that ID.
+func SplitIdentical(txs []model.Transaction) (unique []model.Transaction, identical [][]model.Transaction) {
+	groups := make(map[string][]model.Transaction)
+	for _, tx := range txs {
+		if _, seen := groups[tx.ID]; !seen {
+			unique = append(unique, tx)
+		}
+		groups[tx.ID] = append(groups[tx.ID], tx)
+	}
+	for _, tx := range unique {
+		if g := groups[tx.ID]; len(g) > 1 {
+			identical = append(identical, g)
+		}
+	}
+	return unique, identical
+}

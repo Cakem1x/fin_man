@@ -136,8 +136,8 @@ func TestInsertTransactions_Duplicates(t *testing.T) {
 		},
 	}
 	inserted, duplicates, err = database.InsertTransactions(ctx, newTxs)
-	if err == nil {
-		t.Errorf("expected error due to duplicates, got nil")
+	if err != nil {
+		t.Fatalf("expected no error for duplicates, got %v", err)
 	}
 	if inserted != 1 {
 		t.Errorf("expected 1 insert, got %d", inserted)

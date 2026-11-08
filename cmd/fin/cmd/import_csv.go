@@ -14,12 +14,15 @@ import (
 	"github.com/Cakem1x/fin_man/internal/db"
 	"github.com/Cakem1x/fin_man/internal/dedup"
 	"github.com/Cakem1x/fin_man/internal/importer/genericcsv"
+	"github.com/Cakem1x/fin_man/internal/model"
 	"github.com/Cakem1x/fin_man/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
 var (
-	configPath string
+	configPath    string
+	importVerbose bool
+	importStrict  bool
 )
 
 var importCSVCmd = &cobra.Command{
@@ -88,8 +91,13 @@ var importCSVCmd = &cobra.Command{
 			txs[i].ArchiveFilePath = &destPath
 		}
 
+		txs, identical := dedup.SplitIdentical(txs)
+
 		ctx := context.Background()
 		inserted, duplicates, err := sqliteDB.InsertTransactions(ctx, txs)
+		if err != nil {
+			return fmt.Errorf("failed to insert transactions: %w", err)
+		}
 
 		if inserted > 0 {
 			if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -125,19 +133,34 @@ var importCSVCmd = &cobra.Command{
 		if inserted > 0 {
 			embedAfterImport(ctx, mgr, sqliteDB)
 		}
-		if len(duplicates) > 0 {
-			fmt.Printf("Skipped %d duplicate transactions:\n", len(duplicates))
-			for _, pair := range duplicates {
-				fmt.Printf("- Existing: %s | %s | %d %s | %s\n", pair.Existing.Date.Format("2006-01-02"), pair.Existing.Payee, pair.Existing.AmountCents, pair.Existing.Currency, pair.Existing.Memo)
-				fmt.Printf("  New:      %s | %s | %d %s | %s\n", pair.New.Date.Format("2006-01-02"), pair.New.Payee, pair.New.AmountCents, pair.New.Currency, pair.New.Memo)
-			}
-			return fmt.Errorf("import finished with %d duplicate errors", len(duplicates))
-		} else if err != nil {
-			return fmt.Errorf("failed to insert transactions: %w", err)
+		printDuplicates(duplicates, identical)
+		if importStrict && (len(duplicates) > 0 || len(identical) > 0) {
+			return fmt.Errorf("--strict: import found duplicates")
 		}
 
 		return nil
 	},
+}
+
+// printDuplicates reports duplicates of existing rows as info and identical
+// rows within the file as a warning.
+func printDuplicates(duplicates []db.DuplicatePair, identical [][]model.Transaction) {
+	if len(duplicates) > 0 {
+		fmt.Printf("Skipped %d transactions that already exist\n", len(duplicates))
+		if importVerbose {
+			for _, pair := range duplicates {
+				fmt.Printf("- Existing: %s\n", formatTx(pair.Existing))
+				fmt.Printf("  New:      %s\n", formatTx(pair.New))
+			}
+		}
+	}
+	for _, group := range identical {
+		fmt.Fprintf(os.Stderr, "Warning: %d identical rows in file, stored only once: %s\n", len(group), formatTx(group[0]))
+	}
+}
+
+func formatTx(tx model.Transaction) string {
+	return fmt.Sprintf("%s | %s | %d %s | %s", tx.Date.Format("2006-01-02"), tx.Payee, tx.AmountCents, tx.Currency, tx.Memo)
 }
 
 // embedAfterImport runs embedTransactions if enabled in fin.toml.
@@ -161,5 +184,6 @@ func init() {
 	available := genericcsv.AvailableConfigs()
 	configDesc := fmt.Sprintf("Path to config JSON file OR builtin config name %v", available)
 	importCSVCmd.Flags().StringVarP(&configPath, "config", "c", "", configDesc)
-	// Archiving is now enabled by default.
+	importCSVCmd.Flags().BoolVarP(&importVerbose, "verbose", "v", false, "List each skipped duplicate")
+	importCSVCmd.Flags().BoolVar(&importStrict, "strict", false, "Exit 1 when any duplicate occurs")
 }

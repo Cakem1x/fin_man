@@ -29,7 +29,8 @@ type DuplicatePair struct {
 }
 
 // InsertTransactions inserts a batch of transactions into the database.
-// It uses ON CONFLICT(id) DO NOTHING to ignore duplicates.
+// A transaction whose ID already exists is not inserted. It is returned as a
+// DuplicatePair instead. Duplicates are not an error.
 func (db *DB) InsertTransactions(ctx context.Context, txs []model.Transaction) (int, []DuplicatePair, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -90,11 +91,7 @@ func (db *DB) InsertTransactions(ctx context.Context, txs []model.Transaction) (
 		return 0, nil, fmt.Errorf("failed to commit tx: %w", err)
 	}
 
-	if len(duplicates) > 0 {
-		return insertedCount, duplicates, fmt.Errorf("found %d duplicate transactions", len(duplicates))
-	}
-
-	return insertedCount, nil, nil
+	return insertedCount, duplicates, nil
 }
 
 func (db *DB) GetAllCategories(ctx context.Context) ([]model.Category, error) {
