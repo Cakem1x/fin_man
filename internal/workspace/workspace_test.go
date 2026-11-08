@@ -8,6 +8,17 @@ import (
 	"github.com/Cakem1x/fin_man/internal/workspace"
 )
 
+// forbidTempFiles points os.TempDir() to a read-only directory until t ends.
+// Creating a file in os.TempDir() then fails.
+func forbidTempFiles(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Fatalf("failed to make temp dir read-only: %v", err)
+	}
+	t.Setenv("TMPDIR", dir)
+}
+
 func TestWorkspaceLifecycle(t *testing.T) {
 	wsDir := t.TempDir()
 	cipherDir := filepath.Join(t.TempDir(), "finance.cipher") // Store somewhere outside to test linking
@@ -15,6 +26,7 @@ func TestWorkspaceLifecycle(t *testing.T) {
 	m := workspace.NewManager(wsDir)
 
 	t.Run("InitNewStore", func(t *testing.T) {
+		forbidTempFiles(t)
 		err := m.Init(cipherDir, "test-password")
 		if err != nil {
 			t.Fatalf("Init failed: %v", err)
@@ -48,6 +60,7 @@ func TestWorkspaceLifecycle(t *testing.T) {
 	})
 
 	t.Run("Open", func(t *testing.T) {
+		forbidTempFiles(t)
 		err := m.Open("test-password")
 		if err != nil {
 			t.Fatalf("Open failed: %v", err)
