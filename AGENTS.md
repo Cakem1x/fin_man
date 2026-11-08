@@ -1,5 +1,16 @@
 # Agent Instructions for fin_man
 
+## Worktree and Tasks
+- The default branch is 'main'. Merging to main is done by the user.
+- When instructed, create a new worktree to run your task in. If you get a large task, ask whether it should run in a separate worktree.
+- Worktree-based workflows require herdr (`HERDR_ENV=1`). Use `herdr worktree create` to create both the git worktree and a herdr workspace in one step:
+  ```bash
+  herdr worktree create --cwd "$PWD" --branch <branch-name> --label "<task label>" --no-focus
+  ```
+  Derive `<branch-name>` from the task description (e.g., `feat/add-login-page`).
+  Read the worktree checkout path from the JSON response (`.result.worktree.path`) and use it as the working directory for all subsequent commands.
+- Read the task file from `project_management/tasks/active/` for requirements and context. Reference architecture docs in `project_management/architecture/` as needed.
+
 ## Environment & Tooling
 This project uses `nix flake` and `just` for its development environment and task running.
 
