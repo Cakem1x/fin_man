@@ -1,26 +1,17 @@
 # Encryption
 
-The finance tools do not implement encryption directly.
+`fin` does not implement encryption.
+`fin workspace` drives [gocryptfs](https://nuetzlich.net/gocryptfs/) to encrypt the workspace data.
 
-## Recommended Setup
+## Lifecycle
 
-### Active Store
-
-Use:
-
-- gocryptfs
-- CryFS
-
-The SQLite database lives inside the mounted encrypted directory.
-
-## Workflow
-
-1. mount encrypted store
-2. work with tools
-3. close tools
-4. unmount store
-5. sync/backup
+1. `fin workspace init --store <path>`: creates the gocryptfs store at `<path>` (or reuses an existing one), writes `fin.toml`, mounts the store, and creates the database.
+2. `fin workspace open`: asks for the password and mounts the store at `store/`.
+3. Work with `fin import-csv`, `fin tui`, and other commands. They refuse to run while the workspace is closed.
+4. `fin workspace close`: unmounts `store/` with `fusermount -u`.
+5. Sync or back up the encrypted store (see [backup and sync](backup-and-sync.md)).
 
 ## Notes
 
-Avoid syncing a live SQLite database when possible.
+The encrypted store can live outside the workspace directory, e.g. in a synced folder.
+Only the encrypted store needs to be synced or backed up.

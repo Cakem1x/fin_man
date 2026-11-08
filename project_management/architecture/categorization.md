@@ -2,16 +2,12 @@
 
 ## Pipeline
 
-1. deterministic rules
-2. similarity suggestions
-3. manual review
+1. similarity suggestions
+2. manual review
 
-## Rule Examples
-
-- payee contains
-- regex match
-- IBAN match
-- account-specific rules
+There are no deterministic categorization rules.
+The user confirms every categorization.
+The estimator learns from each confirmed transaction.
 
 ## Similarity Suggestions
 
@@ -32,12 +28,12 @@ positive examples and nearby counterexamples affect the result.
 
 ## Review Workflow
 
-The user reviews proposed categories in a TUI and can:
+The user reviews proposed categories in the TUI and can:
 
-- accept
-- edit
-- create rules
-- add tags
+- accept a suggestion
+- pick or create a category
+- pick or create tags
+- edit the note
 
 The review lists are ordered by score, with the original option order used to
 break ties. Scores are shown as percentages. A category or tag is preselected

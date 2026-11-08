@@ -1,20 +1,18 @@
 # Reporting
 
-## Initial Reports
+## Approach
 
-- monthly summaries
-- category totals
-- merchant analysis
-- cashflow
-- account balances
+- The TUI overview shows category totals and stats for a selected time range.
+- `fin export` (planned) writes filtered transactions as CSV or JSON.
+  Filters: date range, account, category, review state, payee substring.
+- Ad-hoc analysis uses external tools on the export (e.g. duckdb, visidata, jq, spreadsheets).
 
-## Output Formats
+A built-in `fin report` command is deferred until a concrete need comes up.
 
-- terminal tables
-- CSV export
+## Future Export Formats
 
-HTML export may be added later.
+- ledger / hledger
 
 ## Query Philosophy
 
-Reports are read-only and reproducible.
+Reports and exports are read-only and reproducible.

@@ -1,31 +1,33 @@
 # Roadmap
 
-## Phase 1
+Open work is tracked as tasks in `project_management/tasks/backlog/`.
 
-- schema
-- migrations
-- CSV importer
-- query CLI
+## Phase 1: Import
 
-## Phase 2
+- [x] schema and migrations
+- [x] encrypted workspace
+- [x] CSV importer with deduplication
+- [ ] accounts
 
-- categorization rules
-- similarity engine
-- review TUI
+## Phase 2: Categorization
 
-## Phase 3
+- [x] similarity engine
+- [x] review TUI
+- [x] receipt matcher (Amazon)
+- [ ] TUI UX rework
 
-- reports
-- exports
-- recurring transaction detection
+## Phase 3: Export
 
-## Phase 4
+- [ ] `fin export` (CSV, JSON)
+- [ ] recurring transaction detection
 
-- bank APIs
-- automation helpers
+## Phase 4: Automation
+
+- [ ] bank APIs (PSD2, FinTS/HBCI)
 
 ## Future Ideas
 
+- internal transfers between own accounts
 - investment tracking
 - forecasting
 - receipt attachments

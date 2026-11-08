@@ -27,3 +27,6 @@ When editing transactions, make more use of the top panel that shows the transac
 
 ## Implementation Rules
 I've sketched a rough idea of how the UX should look like. You need to ensure that UX is consistent over all views. Ask questions if necessary to change behavior for consistency. Also keep in mind how much extra custom code is needed. It is worth falling back to slightly different behaviors if that is better supported by UI libs we use.
+
+# Subtasks
+`tui_keymap.md`, `tui_panel_navigation.md`, `tui_edit_view.md`, `tui_fuzzy_filter.md`, `tui_accounts.md`
