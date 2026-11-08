@@ -277,29 +277,18 @@ func (m *OverviewModel) saveReview(res *ReviewResult) (tea.Model, tea.Cmd) {
 					m.tags = append(m.tags, t)
 				}
 			}
-			for i, t := range m.transactions {
-				if t.ID == m.reviewingID {
-					catName := res.Category
-					m.transactions[i].CategoryName = &catName
-					m.transactions[i].IsReviewed = markReviewed
-					m.transactions[i].Memo = res.Memo
-
-					// Online learning: teach the estimator from the reviewed transaction.
-					if markReviewed && res.Category != "" {
-						learnTx := m.transactions[i]
-						catID := res.Category // use name as fallback ID
-						learnTx.CategoryID = &catID
-						learnTx.CategoryName = &catName
-						var learnTags []model.Tag
-						for _, tagName := range res.Tags {
-							if tagName != "" {
-								learnTags = append(learnTags, model.Tag{ID: tagName, Name: tagName})
-							}
-						}
-						learnTx.Tags = learnTags
-						m.estimator.Learn(learnTx)
+			txs, err := m.dbConn.ListTransactions(ctx, db.Filter{})
+			if err != nil {
+				log.Printf("failed to reload transactions: %v", err)
+			} else {
+				m.transactions = txs
+			}
+			if markReviewed && res.Category != "" {
+				for _, t := range m.transactions {
+					if t.ID == m.reviewingID {
+						m.estimator.Learn(t)
+						break
 					}
-					break
 				}
 			}
 		}
