@@ -67,15 +67,16 @@ func NewEstimator(corpus []model.Transaction) *Estimator {
 	return e
 }
 
+// nonLetters matches numbers and punctuation.
+var nonLetters = regexp.MustCompile(`[^a-z\s]+`)
+
 // tokenize cleans the input string, removes non-alphabetical characters,
 // and returns a set of unique lowercase words.
 func tokenize(payee, memo string) map[string]struct{} {
 	text := payee + " " + memo
 	text = strings.ToLower(text)
 
-	// Strip out numbers and punctuation
-	reg := regexp.MustCompile(`[^a-z\s]+`)
-	text = reg.ReplaceAllString(text, " ")
+	text = nonLetters.ReplaceAllString(text, " ")
 
 	words := strings.Fields(text)
 	tokens := make(map[string]struct{})
