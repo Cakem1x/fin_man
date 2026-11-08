@@ -13,6 +13,7 @@ func TestWorkspaceLifecycle(t *testing.T) {
 	cipherDir := filepath.Join(t.TempDir(), "finance.cipher") // Store somewhere outside to test linking
 
 	m := workspace.NewManager(wsDir)
+	closeOnCleanup(t, m)
 
 	t.Run("InitNewStore", func(t *testing.T) {
 		err := m.Init(cipherDir, "test-password")
@@ -110,6 +111,7 @@ func TestWorkspaceLifecycle(t *testing.T) {
 		// Create a brand new workspace directory
 		newWsDir := t.TempDir()
 		mNew := workspace.NewManager(newWsDir)
+		closeOnCleanup(t, mNew)
 
 		// Init from existing store (we shouldn't need a password here)
 		exists, _ := mNew.IsStoreInitialized(cipherDir)
@@ -159,6 +161,19 @@ func TestWorkspaceLifecycle(t *testing.T) {
 		err := mNested.Init(cipherDir, "test-password")
 		if err == nil {
 			t.Fatalf("Expected Init to fail on nested workspace, but it succeeded")
+		}
+	})
+}
+
+// closeOnCleanup unmounts the workspace at test end if it is still open,
+// so failed tests leave no mounts behind.
+func closeOnCleanup(t *testing.T, m *workspace.Manager) {
+	t.Helper()
+	t.Cleanup(func() {
+		if isOpen, _ := m.IsOpen(); isOpen {
+			if err := m.Close(); err != nil {
+				t.Errorf("cleanup: %v", err)
+			}
 		}
 	})
 }

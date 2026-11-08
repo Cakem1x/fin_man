@@ -203,12 +203,29 @@ func (m *Manager) Close() error {
 		return fmt.Errorf("workspace is already closed")
 	}
 
+	unmount, err := findUnmountBinary(exec.LookPath)
+	if err != nil {
+		return err
+	}
+
 	mountDir := filepath.Join(m.WorkspaceDir, "store")
-	cmd := exec.Command("fusermount", "-u", mountDir)
+	cmd := exec.Command(unmount, "-u", mountDir)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("fusermount failed: %v, stderr: %s", err, stderr.String())
+		return fmt.Errorf("%s failed: %v, stderr: %s", unmount, err, stderr.String())
 	}
 	return nil
+}
+
+// findUnmountBinary returns the first FUSE unmount binary that lookPath finds.
+// FUSE 3 systems only ship fusermount3.
+func findUnmountBinary(lookPath func(string) (string, error)) (string, error) {
+	candidates := []string{"fusermount3", "fusermount"}
+	for _, name := range candidates {
+		if _, err := lookPath(name); err == nil {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("neither %s nor %s found in PATH", candidates[0], candidates[1])
 }
