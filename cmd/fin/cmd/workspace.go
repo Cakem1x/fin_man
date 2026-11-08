@@ -173,6 +173,13 @@ var workspaceUpgradeCmd = &cobra.Command{
 			return err
 		}
 		defer closeDB()
+		violations, err := sqliteDB.ForeignKeyViolations(cmd.Context())
+		if err != nil {
+			return err
+		}
+		for _, v := range violations {
+			fmt.Printf("Warning: %d row(s) in %s reference missing rows in %s\n", v.Count, v.Table, v.Parent)
+		}
 		if err := db.Migrate(sqliteDB.DB); err != nil {
 			return fmt.Errorf("migration failed: %w", err)
 		}
