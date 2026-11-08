@@ -17,6 +17,7 @@
 
         # Main application package
         fin_man = pkgs.callPackage ./nix/package.nix { };
+        ollama-serve = pkgs.callPackage ./nix/ollama-serve.nix { };
 
         pre-commit-check = pre-commit-hooks.lib.${system}.run {
           src = ./.;
@@ -56,6 +57,12 @@
           default = fin_man;
         };
 
+        apps.ollama-serve = {
+          type = "app";
+          program = pkgs.lib.getExe ollama-serve;
+          meta.description = "Start Ollama if not running and pull the models fin uses";
+        };
+
         checks = {
           inherit pre-commit-check;
         };
@@ -83,6 +90,9 @@
 
             # encrypt
             gocryptfs
+
+            # local LLM server
+            ollama
           ];
 
           buildInputs = pre-commit-check.enabledPackages;

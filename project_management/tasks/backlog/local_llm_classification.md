@@ -1,5 +1,18 @@
 # Backlog: Local LLM–assisted transaction classification (Ollama)
 
+## Status
+Done (branch `feat/local-llm-embeddings`): Shared groundwork 1–3, Phase 1 items 1–5, startup part of Phase 1 item 6, Nix / tooling.
+
+Remaining:
+- Phase 1 item 6: async embedding in the review TUI, `ReviewModel.UpdateSuggestion`, passing new vectors on online learning. Wait for `app_service_layer`, `review_draft_model`, `tui_edit_view`.
+- Phase 1 tuning: leave-one-out comparison on real data to confirm `cosineFloor` (currently 0.7, chosen on synthetic merchant names).
+- Phase 2 (generative fallback).
+
+Deviations from the plan below:
+- No `GetTransactionsMissingEmbedding` DB method. The DB cannot compute the text hash; `categorize.EnsureEmbeddings` compares the stored hash with the current text instead.
+- The model input is `EmbeddingText` with a qwen3-embedding instruction prefix. The hash covers the full input.
+- `fin classify` errors out if `[llm]` is disabled.
+
 ## Context
 Classification currently uses a distance-weighted k-NN over token-set Jaccard similarity of payee+memo (`internal/categorize/estimator.go`). It works well for repeat payees but fails when no tokens overlap (e.g. "REWE Markt" vs "EDEKA Center", new payees, abbreviations). Goal: use small local models via Ollama — data stays on the machine — to improve suggestions, without changing the review UX contract (ranked lists, 80% preselect, user confirms).
 
@@ -22,11 +35,11 @@ Prefer doing these first; adapt the TUI/cmd parts below to their result:
 - At the end, update `project_management/architecture/categorization.md` (single source of truth for the algorithm): embedding similarity, LLM fallback, config.
 
 ## Shared groundwork
-1. **Ollama client** – new package `internal/ollama` (stdlib `net/http` only, no new deps):
+1. [done] **Ollama client** – new package `internal/ollama` (stdlib `net/http` only, no new deps):
    - `Client{BaseURL, HTTPClient}`; `Embed(ctx, model string, inputs []string) ([][]float32, error)` → `POST /api/embed`.
    - `ChatJSON(ctx, model string, msgs []Message, schema any) ([]byte, error)` → `POST /api/chat` with `stream:false`, `format:<json schema>`, `options.temperature:0`, `think:false`.
    - Tests with `httptest.Server` (request shape, error/timeout handling).
-2. **Config** – extend `workspace.Config` (`internal/workspace/workspace.go`) with optional section; export `LoadConfig` (currently private `loadConfig`):
+2. [done] **Config** – extend `workspace.Config` (`internal/workspace/workspace.go`) with optional section; export `LoadConfig` (currently private `loadConfig`):
    ```toml
    [llm]
    enabled = true
@@ -36,19 +49,19 @@ Prefer doing these first; adapt the TUI/cmd parts below to their result:
    fallback_threshold = 0.8               # top k-NN category score below this triggers Phase 2
    ```
    Defaults applied when keys missing; `enabled=false` by default. Existing fin.toml files must still parse.
-3. **Embedding text** – `categorize.EmbeddingText(tx)` (payee + memo, strip digit runs/IBAN/reference noise similar to `tokenize`). Unit-tested, since boilerplate dominates embeddings otherwise.
+3. [done] **Embedding text** – `categorize.EmbeddingText(tx)` (payee + memo, strip digit runs/IBAN/reference noise similar to `tokenize`). Unit-tested, since boilerplate dominates embeddings otherwise.
 
 ## Phase 1 – Embedding similarity in k-NN
-1. **Migration** `internal/db/migrations/0006_embeddings.sql`:
+1. [done] **Migration** `internal/db/migrations/0006_embeddings.sql`:
    `transaction_embeddings(transaction_id TEXT REFERENCES transactions(id), model TEXT, text_hash TEXT, vector BLOB, PRIMARY KEY(transaction_id, model))`. `text_hash` invalidates the cache when the memo is edited.
-2. **DB** (`internal/db/db.go`): `GetEmbeddings(ctx, model) (map[string][]float32, error)` (only rows whose hash matches current text), `UpsertEmbeddings(ctx, model, map[txID]{hash, vec})`, `GetTransactionsMissingEmbedding(ctx, model)`. Vectors as little-endian float32 BLOB.
-3. **Estimator** (`internal/categorize/estimator.go`):
+2. [done] **DB** (`internal/db/db.go`): `GetEmbeddings(ctx, model) (map[string][]float32, error)` (only rows whose hash matches current text), `UpsertEmbeddings(ctx, model, map[txID]{hash, vec})`, `GetTransactionsMissingEmbedding(ctx, model)`. Vectors as little-endian float32 BLOB.
+3. [done] **Estimator** (`internal/categorize/estimator.go`):
    - Store tx ID in `trainedData`; add optional vector store: `NewEstimator(corpus, WithEmbeddings(vecs))`, `SetEmbedding(txID, vec)`; `Learn` unchanged signature.
    - Similarity: `S = max(jaccard, rescaledCosine)` where `rescaledCosine = clamp((cos - floor)/(1 - floor), 0, 1)`, `floor` constant (~0.5, tune on real data). Rescaling is required because unrelated texts still have cosine 0.3–0.6. If either vector is missing, fall back to Jaccard only. Voting/`S^3`/smoothing unchanged.
    - TDD: tests for "no token overlap but close vectors → category wins", "missing vector → identical to current results" (regression guard).
-4. **Embedding service** – `internal/categorize` (or new `internal/assist`) function `EnsureEmbeddings(ctx, db, client, model, txs)`: embeds missing ones in batches of ~64, upserts.
-5. **Batch**: new `cmd/fin/cmd/classify.go` (`fin classify`): open workspace/db like `tui.go`, embed all missing transactions with progress output. Call the same function best-effort at the end of `import_csv.go` when enabled (warn, don't fail, if Ollama is down).
-6. **TUI** (`internal/tui/overview.go`): build estimator with cached vectors at startup. In `openReviewForm`, if the tx has no vector, return an async `tea.Cmd` that embeds+stores it and emits `embeddingReadyMsg{txID, vec}`; on receipt (and if still reviewing that tx) call `estimator.SetEmbedding`, re-estimate, and `reviewModel.UpdateSuggestion(est)`.
+4. [done] **Embedding service** – `internal/categorize` (or new `internal/assist`) function `EnsureEmbeddings(ctx, db, client, model, txs)`: embeds missing ones in batches of ~64, upserts.
+5. [done] **Batch**: new `cmd/fin/cmd/classify.go` (`fin classify`): open workspace/db like `tui.go`, embed all missing transactions with progress output. Call the same function best-effort at the end of `import_csv.go` when enabled (warn, don't fail, if Ollama is down).
+6. [partly done: startup vectors] **TUI** (`internal/tui/overview.go`): build estimator with cached vectors at startup. In `openReviewForm`, if the tx has no vector, return an async `tea.Cmd` that embeds+stores it and emits `embeddingReadyMsg{txID, vec}`; on receipt (and if still reviewing that tx) call `estimator.SetEmbedding`, re-estimate, and `reviewModel.UpdateSuggestion(est)`.
    - New `ReviewModel.UpdateSuggestion` (`internal/tui/review.go`): re-sort lists and update score descriptions, preserving cursor item and any selection the user already changed; apply 80% preselect only if the user has not touched that list. Extract the current sort/preselect logic from `NewReviewModel` into a shared function so both paths use it. Tests in `review_test.go`.
    - Online learning in `saveReview` also passes the vector (already cached).
 
@@ -62,7 +75,7 @@ Prefer doing these first; adapt the TUI/cmd parts below to their result:
    - TUI: use cached suggestion if hash matches, else async `tea.Cmd` → `llmSuggestionMsg` → `ReviewModel.SetLLMSuggestion`.
 4. **Display**: LLM-suggested category/tags are moved to the top of their lists and marked (desc `✦ LLM suggestion`, plus k-NN % if any). Not auto-preselected (no calibrated score); user confirms with one keypress. Status line shows "LLM thinking…" / "LLM unavailable".
 
-## Nix / tooling
+## Nix / tooling [done]
 Ollama is an external HTTP service for `fin`; no runtime dependency in `nix/package.nix`. Models are pulled at runtime into `~/.ollama/models` (not Nix-managed).
 - `flake.nix` devShell: add `ollama` to `packages`.
 - `flake.nix` app `apps.ollama-serve` (new `nix/ollama-serve.nix`, `pkgs.writeShellApplication`, `runtimeInputs = [ ollama curl ]`):

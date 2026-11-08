@@ -11,3 +11,6 @@ lint:
   golangci-lint run
 
 ci: lint build test
+
+ollama-serve *models:
+  nix run .#ollama-serve -- {{models}}

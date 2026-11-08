@@ -11,8 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Cakem1x/fin_man/internal/db"
 	"github.com/Cakem1x/fin_man/internal/dedup"
 	"github.com/Cakem1x/fin_man/internal/importer/genericcsv"
+	"github.com/Cakem1x/fin_man/internal/workspace"
 	"github.com/spf13/cobra"
 )
 
@@ -120,6 +122,9 @@ var importCSVCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Imported %d new transactions\n", inserted)
+		if inserted > 0 {
+			embedAfterImport(ctx, mgr, sqliteDB)
+		}
 		if len(duplicates) > 0 {
 			fmt.Printf("Skipped %d duplicate transactions:\n", len(duplicates))
 			for _, pair := range duplicates {
@@ -133,6 +138,22 @@ var importCSVCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// embedAfterImport runs embedTransactions if enabled in fin.toml.
+// Failures only print a warning, because embeddings are optional.
+func embedAfterImport(ctx context.Context, mgr *workspace.Manager, dbConn *db.DB) {
+	cfg, err := mgr.LoadConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: skipped embedding, failed to read fin.toml: %v\n", err)
+		return
+	}
+	if !cfg.LLM.Enabled {
+		return
+	}
+	if err := embedTransactions(ctx, cfg.LLM, dbConn); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: embedding failed, run 'fin classify' later: %v\n", err)
+	}
 }
 
 func init() {

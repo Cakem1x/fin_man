@@ -162,7 +162,9 @@ type OverviewModel struct {
 	height int
 }
 
-func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB) OverviewModel {
+// NewOverviewModel creates the overview. embeddings holds cached transaction
+// vectors for the estimator and may be nil.
+func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB, embeddings map[string][]float32) OverviewModel {
 	// Setup list
 	l := list.New([]list.Item{}, getListDelegate(true), 0, 0)
 	l.Title = "Categories"
@@ -198,7 +200,7 @@ func NewOverviewModel(transactions []model.Transaction, dbConn *db.DB) OverviewM
 	}
 
 	categorizedTxs, _ := dbConn.ListTransactions(ctx, db.Filter{ExcludeUncategorized: true})
-	estimator := categorize.NewEstimator(categorizedTxs)
+	estimator := categorize.NewEstimator(categorizedTxs, categorize.WithEmbeddings(embeddings))
 
 	m := OverviewModel{
 		dbConn:       dbConn,

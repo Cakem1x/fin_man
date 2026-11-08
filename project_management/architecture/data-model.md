@@ -21,6 +21,10 @@ Mutually exclusive classification. Nested categories use `/` in the name (e.g. `
 
 Reusable labels. `transaction_tags` links tags to transactions.
 
+### transaction_embeddings
+
+Cached embedding vectors per transaction and model (see [categorization](categorization.md)).
+
 ### accounts (planned)
 
 Bank accounts: `name`, `iban`, `currency`. `transactions.account_id` references an account.

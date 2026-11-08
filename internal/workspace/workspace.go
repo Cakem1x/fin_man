@@ -13,7 +13,28 @@ import (
 )
 
 type Config struct {
-	StorePath string `toml:"store_path"`
+	StorePath string    `toml:"store_path"`
+	LLM       LLMConfig `toml:"llm,omitempty"`
+}
+
+// LLMConfig is the optional [llm] section of fin.toml.
+type LLMConfig struct {
+	Enabled           bool    `toml:"enabled"`
+	Endpoint          string  `toml:"endpoint"`
+	EmbedModel        string  `toml:"embed_model"`
+	ChatModel         string  `toml:"chat_model"`
+	FallbackThreshold float64 `toml:"fallback_threshold"`
+}
+
+// DefaultLLMConfig returns the values used for keys missing in fin.toml.
+func DefaultLLMConfig() LLMConfig {
+	return LLMConfig{
+		Enabled:           false,
+		Endpoint:          "http://localhost:11434",
+		EmbedModel:        "qwen3-embedding:0.6b",
+		ChatModel:         "qwen3:1.7b",
+		FallbackThreshold: 0.8,
+	}
 }
 
 // Manager handles the lifecycle of a git-like encrypted finance workspace.
@@ -123,12 +144,13 @@ func (m *Manager) Init(storePath, password string) error {
 	return nil
 }
 
-func (m *Manager) loadConfig() (*Config, error) {
+// LoadConfig reads fin.toml and applies DefaultLLMConfig for missing [llm] keys.
+func (m *Manager) LoadConfig() (*Config, error) {
 	b, err := os.ReadFile(filepath.Join(m.WorkspaceDir, "fin.toml"))
 	if err != nil {
 		return nil, err
 	}
-	var cfg Config
+	cfg := Config{LLM: DefaultLLMConfig()}
 	if err := toml.Unmarshal(b, &cfg); err != nil {
 		return nil, err
 	}
@@ -167,7 +189,7 @@ func (m *Manager) Open(password string) error {
 		return fmt.Errorf("workspace is already open")
 	}
 
-	cfg, err := m.loadConfig()
+	cfg, err := m.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("failed to read fin.toml: %w", err)
 	}

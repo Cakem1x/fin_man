@@ -19,6 +19,10 @@ const smoothingAlpha = 0.1
 // a 0.2 similarity contributes only 0.008 weight while a 0.9 contributes 0.729.
 const similarityExponent = 3.0
 
+// cosineFloor is the cosine similarity that maps to an embedding similarity
+// of 0. The rationale is in project_management/architecture/categorization.md.
+const cosineFloor = 0.7
+
 // CategoryEstimation holds the classification score for a single category.
 type CategoryEstimation struct {
 	CategoryName string
@@ -41,6 +45,7 @@ type Estimation struct {
 }
 
 type trainedData struct {
+	ID           string
 	Tokens       map[string]struct{}
 	CategoryID   string
 	CategoryName string
@@ -51,15 +56,32 @@ type trainedData struct {
 // reviewed transactions and estimates category/tag scores for new ones.
 type Estimator struct {
 	memory          []trainedData
-	knownCategories map[string]string // name -> id
-	knownTags       map[string]string // name -> id
+	knownCategories map[string]string    // name -> id
+	knownTags       map[string]string    // name -> id
+	embeddings      map[string][]float32 // transaction ID -> vector
 }
 
-func NewEstimator(corpus []model.Transaction) *Estimator {
+// Option configures an Estimator.
+type Option func(*Estimator)
+
+// WithEmbeddings provides embedding vectors keyed by transaction ID.
+func WithEmbeddings(vecs map[string][]float32) Option {
+	return func(e *Estimator) {
+		for id, v := range vecs {
+			e.embeddings[id] = v
+		}
+	}
+}
+
+func NewEstimator(corpus []model.Transaction, opts ...Option) *Estimator {
 	e := &Estimator{
 		memory:          make([]trainedData, 0, len(corpus)),
 		knownCategories: make(map[string]string),
 		knownTags:       make(map[string]string),
+		embeddings:      make(map[string][]float32),
+	}
+	for _, opt := range opts {
+		opt(e)
 	}
 	for _, tx := range corpus {
 		e.Learn(tx)
@@ -104,6 +126,32 @@ func jaccardSimilarity(a, b map[string]struct{}) float64 {
 	return float64(intersection) / float64(union)
 }
 
+// SetEmbedding sets the embedding vector of a transaction.
+func (e *Estimator) SetEmbedding(txID string, vec []float32) {
+	e.embeddings[txID] = vec
+}
+
+// embeddingSimilarity returns the cosine similarity of the transactions'
+// vectors, linearly rescaled from [cosineFloor, 1] to [0, 1].
+// It returns 0 if a vector is missing.
+func (e *Estimator) embeddingSimilarity(idA, idB string) float64 {
+	a, b := e.embeddings[idA], e.embeddings[idB]
+	if len(a) == 0 || len(a) != len(b) {
+		return 0
+	}
+	var dot, normA, normB float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+		normA += float64(a[i]) * float64(a[i])
+		normB += float64(b[i]) * float64(b[i])
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	cos := dot / math.Sqrt(normA*normB)
+	return math.Max(0, (cos-cosineFloor)/(1-cosineFloor))
+}
+
 // Learn adds a newly reviewed transaction to the model's memory dynamically.
 func (e *Estimator) Learn(tx model.Transaction) {
 	// Only learn from transactions that actually have a category
@@ -123,6 +171,7 @@ func (e *Estimator) Learn(tx model.Transaction) {
 	}
 
 	e.memory = append(e.memory, trainedData{
+		ID:           tx.ID,
 		Tokens:       tokenize(tx.Payee, tx.Memo),
 		CategoryID:   *tx.CategoryID,
 		CategoryName: catName,
@@ -141,7 +190,8 @@ func (e *Estimator) Learn(tx model.Transaction) {
 //
 //	Score(T) = W_pos(T) / (W_pos(T) + W_neg(T) + alpha)
 //
-// Vote weight W_i = S_i^3 where S_i is the Jaccard similarity.
+// Vote weight W_i = S_i^3 where S_i is the larger of the Jaccard similarity
+// and the embedding similarity.
 func (e *Estimator) Estimate(tx model.Transaction) *Estimation {
 	if len(e.memory) == 0 {
 		return nil
@@ -155,7 +205,7 @@ func (e *Estimator) Estimate(tx model.Transaction) *Estimation {
 	tagWeightNeg := make(map[string]float64) // tag name -> negative weight
 
 	for _, pastTx := range e.memory {
-		sim := jaccardSimilarity(txTokens, pastTx.Tokens)
+		sim := math.Max(jaccardSimilarity(txTokens, pastTx.Tokens), e.embeddingSimilarity(tx.ID, pastTx.ID))
 		weight := math.Pow(sim, similarityExponent)
 
 		// Category vote: this transaction votes for its own category.

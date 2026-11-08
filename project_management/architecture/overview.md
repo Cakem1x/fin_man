@@ -37,6 +37,7 @@
 
 - `workspace {init,open,close,upgrade}`: workspace and encrypted store lifecycle (see [encryption](encryption.md))
 - `import-csv`: import a bank CSV export (see [importing](importing.md))
+- `classify`: compute transaction embeddings with Ollama (see [categorization](categorization.md))
 - `tui`: explore, categorize, tag, and enrich transactions (see [categorization](categorization.md), [enrichment](enrichment.md))
 - `account` (planned): manage accounts (see [data model](data-model.md))
 - `export` (planned): write filtered transactions as CSV or JSON (see [reporting](reporting.md))
@@ -56,7 +57,7 @@ Workspace layout while the workspace is open:
 
 ```text
 my-finances/
-├── fin.toml          # store_path: location of the encrypted gocryptfs store
+├── fin.toml          # store_path: location of the encrypted gocryptfs store; optional [llm] section
 └── store/            # mount point of the decrypted store
     ├── finance.db    # SQLite database
     └── archives/     # copies of imported source files, e.g. csv_dkb_v1/

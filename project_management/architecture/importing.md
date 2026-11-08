@@ -19,6 +19,7 @@ source -> parsing -> normalization -> deduplication -> insert (source file archi
 2. **Normalization**: Cleans whitespace and title-cases the payee.
 3. **Deduplication**: The transaction ID is a SHA-256 hash of date, lowercased payee, amount, currency, and the memo reduced to lowercase letters and digits. A transaction whose ID already exists is a duplicate and is not inserted. This makes overlapping imports safe.
 4. **Archiving**: When at least one transaction is new, the source file is copied to `store/archives/csv_<config>/<timestamp>_<file>`. Each transaction stores this path in `archive_file_path`.
+5. **Embedding**: When at least one transaction is new and `[llm]` is enabled, missing embeddings are computed (see [categorization](categorization.md)). A failure prints a warning and does not fail the import.
 
 ## Importer Design
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Cakem1x/fin_man/internal/categorize"
 	"github.com/Cakem1x/fin_man/internal/db"
 	"github.com/Cakem1x/fin_man/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
@@ -32,7 +33,19 @@ var tuiCmd = &cobra.Command{
 			return fmt.Errorf("failed to fetch transactions: %w", err)
 		}
 
-		m := tui.NewOverviewModel(txs, dbConn)
+		var embeddings map[string][]float32
+		cfg, err := mgr.LoadConfig()
+		if err != nil {
+			return fmt.Errorf("failed to read fin.toml: %w", err)
+		}
+		if cfg.LLM.Enabled {
+			embeddings, err = categorize.LoadEmbeddings(ctx, dbConn, cfg.LLM.EmbedModel, txs)
+			if err != nil {
+				return fmt.Errorf("failed to load embeddings: %w", err)
+			}
+		}
+
+		m := tui.NewOverviewModel(txs, dbConn, embeddings)
 		p := tea.NewProgram(&m, tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("error running TUI: %w", err)
