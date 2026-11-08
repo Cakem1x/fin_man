@@ -71,8 +71,6 @@
             golangci-lint
             gopls
             gotools
-            antigravity-cli
-            codex
 
             # Database tools
             goose
