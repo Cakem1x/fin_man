@@ -12,6 +12,7 @@ Multiple bank accounts need to be told apart for filtering and, later, balances.
 - `internal/db`: `CreateAccount`, `GetAccountByName`, `ListAccounts`. Account IDs are random hex like category IDs (`category_tag_ids.md`).
 - `fin import-csv --account <name>` is required. Unknown name: ask for confirmation (`internal/prompt.Confirm`), then create the account.
 - Inserted transactions get `account_id`.
+- Add an account filter (account names) to `db.Filter` and `ListTransactions` (`internal/db/list.go`).
 
 ## Out of scope
 - Including the account in the ID hash. That happens in `repair_from_archives.md` together with re-keying.
