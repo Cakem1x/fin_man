@@ -15,6 +15,7 @@ Open work is tracked as tasks in `project_management/tasks/backlog/`.
 - [x] review TUI
 - [x] receipt matcher (Amazon)
 - [ ] TUI UX rework
+- [ ] batch review (`fin review`)
 
 ## Phase 3: Export
 
