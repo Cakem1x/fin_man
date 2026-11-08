@@ -94,39 +94,9 @@ var importCSVCmd = &cobra.Command{
 		txs, identical := dedup.SplitIdentical(txs)
 
 		ctx := context.Background()
-		inserted, duplicates, err := sqliteDB.InsertTransactions(ctx, txs)
+		inserted, duplicates, err := archiveAndInsert(ctx, sqliteDB, csvPath, destPath, txs)
 		if err != nil {
-			return fmt.Errorf("failed to insert transactions: %w", err)
-		}
-
-		if inserted > 0 {
-			if err := os.MkdirAll(destDir, 0755); err != nil {
-				return fmt.Errorf("failed to create archive directory: %w", err)
-			}
-
-			srcFile, err := os.Open(csvPath)
-			if err != nil {
-				return fmt.Errorf("failed to open input file for archiving: %w", err)
-			}
-			defer func() {
-				if err := srcFile.Close(); err != nil {
-					log.Printf("failed to close src file: %v", err)
-				}
-			}()
-
-			dstFile, err := os.Create(destPath)
-			if err != nil {
-				return fmt.Errorf("failed to create archive file: %w", err)
-			}
-			defer func() {
-				if err := dstFile.Close(); err != nil {
-					log.Printf("failed to close dst file: %v", err)
-				}
-			}()
-
-			if _, err := io.Copy(dstFile, srcFile); err != nil {
-				return fmt.Errorf("failed to copy to archive: %w", err)
-			}
+			return err
 		}
 
 		fmt.Printf("Imported %d new transactions\n", inserted)
@@ -140,6 +110,63 @@ var importCSVCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+type transactionInserter interface {
+	InsertTransactions(ctx context.Context, txs []model.Transaction) (int, []db.DuplicatePair, error)
+}
+
+// archiveAndInsert copies srcPath to destPath and then inserts txs.
+// It inserts nothing if the copy fails.
+// It removes the copy if the insert fails or inserts nothing.
+func archiveAndInsert(ctx context.Context, inserter transactionInserter, srcPath, destPath string, txs []model.Transaction) (int, []db.DuplicatePair, error) {
+	if err := copyFile(srcPath, destPath); err != nil {
+		return 0, nil, fmt.Errorf("failed to archive input file: %w", err)
+	}
+
+	inserted, duplicates, err := inserter.InsertTransactions(ctx, txs)
+	if err != nil || inserted == 0 {
+		if rmErr := os.Remove(destPath); rmErr != nil {
+			log.Printf("failed to remove archive file %s: %v", destPath, rmErr)
+		}
+	}
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to insert transactions: %w", err)
+	}
+	return inserted, duplicates, nil
+}
+
+// copyFile copies srcPath to destPath and creates missing parent directories.
+// It removes a partially written destPath on failure.
+func copyFile(srcPath, destPath string) (err error) {
+	srcFile, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := srcFile.Close(); err != nil {
+			log.Printf("failed to close src file: %v", err)
+		}
+	}()
+
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return err
+	}
+	dstFile, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := dstFile.Close(); err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			_ = os.Remove(destPath)
+		}
+	}()
+
+	_, err = io.Copy(dstFile, srcFile)
+	return err
 }
 
 // printDuplicates reports duplicates of existing rows as info and identical
