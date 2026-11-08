@@ -61,3 +61,38 @@ func TestEnrichTransaction_SameNewTagSharesID(t *testing.T) {
 		t.Errorf("tag ID equals its name %q", txs[0].Tags[0].ID)
 	}
 }
+
+func TestEnrichTransaction_NewCategoryAfterRenameGetsOwnID(t *testing.T) {
+	database := openTestDB(t)
+	ctx := context.Background()
+	insertEnrichFixture(t, database, "a", "b")
+
+	if err := database.EnrichTransaction(ctx, "a", "Food", nil, "", false); err != nil {
+		t.Fatalf("EnrichTransaction(a) failed: %v", err)
+	}
+	if err := database.RenameCategory(ctx, "Food", "Groceries"); err != nil {
+		t.Fatalf("RenameCategory failed: %v", err)
+	}
+	if err := database.EnrichTransaction(ctx, "b", "Food", nil, "", false); err != nil {
+		t.Fatalf("EnrichTransaction(b) failed: %v", err)
+	}
+
+	var foodID, groceriesID string
+	if err := database.QueryRowContext(ctx, "SELECT id FROM categories WHERE name = 'Food'").Scan(&foodID); err != nil {
+		t.Fatalf("category Food not found: %v", err)
+	}
+	if err := database.QueryRowContext(ctx, "SELECT id FROM categories WHERE name = 'Groceries'").Scan(&groceriesID); err != nil {
+		t.Fatalf("category Groceries not found: %v", err)
+	}
+	if foodID == groceriesID {
+		t.Errorf("Food and Groceries share ID %q", foodID)
+	}
+
+	var aCategoryID string
+	if err := database.QueryRowContext(ctx, "SELECT category_id FROM transactions WHERE id = 'a'").Scan(&aCategoryID); err != nil {
+		t.Fatalf("transaction a not found: %v", err)
+	}
+	if aCategoryID != groceriesID {
+		t.Errorf("transaction a has category ID %q, want Groceries ID %q", aCategoryID, groceriesID)
+	}
+}
