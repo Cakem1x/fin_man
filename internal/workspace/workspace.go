@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/pelletier/go-toml/v2"
@@ -43,21 +44,9 @@ func NewManager(workspaceDir string) *Manager {
 }
 
 func (m *Manager) runGocryptfs(args []string, password string) error {
-	f, err := os.CreateTemp("", "gocryptfs-pass-*")
-	if err != nil {
-		return fmt.Errorf("failed to create passfile: %w", err)
-	}
-	defer func() { _ = os.Remove(f.Name()) }()
-
-	if _, err := f.WriteString(password); err != nil {
-		return fmt.Errorf("failed to write passfile: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("failed to close passfile: %w", err)
-	}
-
-	fullArgs := append(args, "-passfile", f.Name())
-	cmd := exec.Command("gocryptfs", fullArgs...)
+	// gocryptfs reads the password from stdin if stdin is not a terminal.
+	cmd := exec.Command("gocryptfs", args...)
+	cmd.Stdin = strings.NewReader(password)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
