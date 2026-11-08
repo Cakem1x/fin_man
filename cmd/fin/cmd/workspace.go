@@ -1,13 +1,8 @@
 package cmd
 
 import (
-	"database/sql"
 	"fmt"
-	"log"
 	"os"
-	"path/filepath"
-
-	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/Cakem1x/fin_man/internal/db"
 	"github.com/Cakem1x/fin_man/internal/prompt"
@@ -30,13 +25,13 @@ var workspaceInitCmd = &cobra.Command{
 			return fmt.Errorf("--store flag is required for init")
 		}
 
-		cwd, _ := os.Getwd()
-		mgr := workspace.NewManager(cwd)
+		mgr := workspace.NewManager(workDir)
 
 		if err := mgr.CanInit(); err != nil {
 			return fmt.Errorf("init failed: %w", err)
 		}
 
+		storePath := resolvePath(storePath)
 		exists, err := mgr.IsStoreInitialized(storePath)
 		if err != nil {
 			return fmt.Errorf("failed to check store: %w", err)
@@ -60,42 +55,37 @@ var workspaceInitCmd = &cobra.Command{
 		if err := mgr.Init(storePath, pwd); err != nil {
 			return fmt.Errorf("init failed: %w", err)
 		}
-		fmt.Printf("Workspace configured at %s\n", cwd)
+		fmt.Printf("Workspace configured at %s\n", mgr.WorkspaceDir)
 
 		if err := mgr.Open(pwd); err != nil {
 			return fmt.Errorf("failed to open workspace: %w", err)
 		}
-		fmt.Printf("Workspace mounted at %s/store\n", cwd)
+		fmt.Printf("Workspace mounted at %s/store\n", mgr.WorkspaceDir)
 
-		dbPath := filepath.Join(cwd, "store", "finance.db")
 		dbExists := true
-		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		if _, err := os.Stat(mgr.DBPath()); os.IsNotExist(err) {
 			dbExists = false
 		}
 
-		sqliteDB, err := sql.Open("sqlite3", dbPath)
+		sqliteDB, closeDB, err := openWorkspaceDB(mgr, false)
 		if err != nil {
-			return fmt.Errorf("failed to open database: %w", err)
+			return err
 		}
-		defer func() {
-			if err := sqliteDB.Close(); err != nil {
-				log.Printf("failed to close database: %v", err)
-			}
-		}()
+		defer closeDB()
 
 		if !dbExists {
-			if err := db.Migrate(sqliteDB); err != nil {
+			if err := db.Migrate(sqliteDB.DB); err != nil {
 				return fmt.Errorf("database creation failed: %w", err)
 			}
 			fmt.Println("New database created successfully.")
 		} else {
-			if needsUpgrade, _ := db.NeedsUpgrade(sqliteDB); needsUpgrade {
+			if needsUpgrade, _ := db.NeedsUpgrade(sqliteDB.DB); needsUpgrade {
 				doMigrate, err := prompt.Confirm("Database is out of date. Trigger migration?")
 				if err != nil {
 					return fmt.Errorf("prompt failed: %w", err)
 				}
 				if doMigrate {
-					if err := db.Migrate(sqliteDB); err != nil {
+					if err := db.Migrate(sqliteDB.DB); err != nil {
 						return fmt.Errorf("migration failed: %w", err)
 					}
 					fmt.Println("Workspace database upgraded successfully.")
@@ -108,20 +98,11 @@ var workspaceInitCmd = &cobra.Command{
 	},
 }
 
-func getWorkspaceManager() (*workspace.Manager, string, error) {
-	cwd, _ := os.Getwd()
-	wsDir, err := workspace.FindRoot(cwd)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to find workspace root: %w", err)
-	}
-	return workspace.NewManager(wsDir), wsDir, nil
-}
-
 var workspaceOpenCmd = &cobra.Command{
 	Use:   "open",
 	Short: "Open the encrypted workspace",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		mgr, wsDir, err := getWorkspaceManager()
+		mgr, err := findWorkspace(workDir)
 		if err != nil {
 			return err
 		}
@@ -141,18 +122,14 @@ var workspaceOpenCmd = &cobra.Command{
 		if err := mgr.Open(pwd); err != nil {
 			return fmt.Errorf("open failed: %w", err)
 		}
-		cwd, _ := os.Getwd()
-		fmt.Printf("Workspace mounted at %s/store\n", cwd)
+		fmt.Printf("Workspace mounted at %s/store\n", mgr.WorkspaceDir)
 
-		dbPath := filepath.Join(wsDir, "store", "finance.db")
-		if sqliteDB, err := sql.Open("sqlite3", dbPath); err == nil {
-			if needsUpgrade, _ := db.NeedsUpgrade(sqliteDB); needsUpgrade {
+		if sqliteDB, closeDB, err := openWorkspaceDB(mgr, false); err == nil {
+			if needsUpgrade, _ := db.NeedsUpgrade(sqliteDB.DB); needsUpgrade {
 				fmt.Println("\nNotice: Your workspace database is outdated!")
 				fmt.Println("Please run 'fin workspace upgrade' to update it.")
 			}
-			if err := sqliteDB.Close(); err != nil {
-				log.Printf("failed to close database: %v", err)
-			}
+			closeDB()
 		}
 		return nil
 	},
@@ -162,7 +139,7 @@ var workspaceCloseCmd = &cobra.Command{
 	Use:   "close",
 	Short: "Close the encrypted workspace",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		mgr, _, err := getWorkspaceManager()
+		mgr, err := findWorkspace(workDir)
 		if err != nil {
 			return err
 		}
@@ -178,8 +155,7 @@ var workspaceCloseCmd = &cobra.Command{
 		if err := mgr.Close(); err != nil {
 			return fmt.Errorf("close failed: %w", err)
 		}
-		cwd, _ := os.Getwd()
-		fmt.Printf("Workspace %s/store closed successfully.\n", cwd)
+		fmt.Printf("Workspace %s/store closed successfully.\n", mgr.WorkspaceDir)
 		return nil
 	},
 }
@@ -188,28 +164,16 @@ var workspaceUpgradeCmd = &cobra.Command{
 	Use:   "upgrade",
 	Short: "Upgrade the workspace database",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		mgr, wsDir, err := getWorkspaceManager()
+		mgr, err := findWorkspace(workDir)
 		if err != nil {
 			return err
 		}
-		isOpen, err := mgr.IsOpen()
+		sqliteDB, closeDB, err := openWorkspaceDB(mgr, false)
 		if err != nil {
-			return fmt.Errorf("failed to check workspace state: %w", err)
+			return err
 		}
-		if !isOpen {
-			return fmt.Errorf("workspace must be opened before upgrading the database")
-		}
-		dbPath := filepath.Join(wsDir, "store", "finance.db")
-		sqliteDB, err := sql.Open("sqlite3", dbPath)
-		if err != nil {
-			return fmt.Errorf("failed to open database: %w", err)
-		}
-		defer func() {
-			if err := sqliteDB.Close(); err != nil {
-				log.Printf("failed to close database: %v", err)
-			}
-		}()
-		if err := db.Migrate(sqliteDB); err != nil {
+		defer closeDB()
+		if err := db.Migrate(sqliteDB.DB); err != nil {
 			return fmt.Errorf("migration failed: %w", err)
 		}
 		fmt.Println("Workspace database upgraded successfully.")

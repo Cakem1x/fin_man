@@ -3,13 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
 
-	"github.com/Cakem1x/fin_man/internal/db"
 	"github.com/Cakem1x/fin_man/internal/tui"
-	"github.com/Cakem1x/fin_man/internal/workspace"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
@@ -20,32 +15,15 @@ var tuiCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 
-		cwd, _ := os.Getwd()
-		wsDir, err := workspace.FindRoot(cwd)
+		mgr, err := findWorkspace(workDir)
 		if err != nil {
-			log.Fatalf("failed to find workspace: %v", err)
+			return err
 		}
-
-		mgr := workspace.NewManager(wsDir)
-		isOpen, err := mgr.IsOpen()
+		dbConn, closeDB, err := openWorkspaceDB(mgr, true)
 		if err != nil {
-			log.Fatalf("failed to check workspace state: %v", err)
+			return err
 		}
-		if !isOpen {
-			fmt.Println("Workspace must be opened before viewing tui.")
-			os.Exit(1)
-		}
-
-		dbPath := filepath.Join(wsDir, "store", "finance.db")
-		dbConn, err := db.Open(dbPath)
-		if err != nil {
-			return fmt.Errorf("failed to open database: %w", err)
-		}
-		defer func() {
-			if err := dbConn.Close(); err != nil {
-				log.Printf("failed to close database: %v", err)
-			}
-		}()
+		defer closeDB()
 
 		// Fetch all transactions to allow memory-based dynamic filtering
 		txs, err := dbConn.ListTransactions(ctx, db.Filter{})

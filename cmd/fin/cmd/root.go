@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
@@ -13,11 +14,11 @@ var rootCmd = &cobra.Command{
 	Use:   "fin",
 	Short: "fin is a CLI for personal finance management",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if workDir != "." {
-			if err := os.Chdir(workDir); err != nil {
-				return fmt.Errorf("failed to change directory: %w", err)
-			}
+		absWorkDir, err := filepath.Abs(workDir)
+		if err != nil {
+			return fmt.Errorf("failed to resolve workdir: %w", err)
 		}
+		workDir = absWorkDir
 		return nil
 	},
 }
