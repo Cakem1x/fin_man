@@ -9,6 +9,7 @@ If the copy fails, the rows reference a file that does not exist.
 - Insert the transactions.
 - If the insert fails or inserts nothing, remove the archive copy.
 - Move the copy logic out of `RunE` into a testable function.
+- Keep the order of the later steps: embeddings are computed after a successful insert (`embedAfterImport`), then duplicates are reported.
 
 ## Acceptance criteria
 Write failing tests first:
@@ -16,4 +17,4 @@ Write failing tests first:
 - When no transaction is new, no archive file remains.
 
 ## Depends on
-`import_duplicates_nonfatal.md` (both change the same `RunE`; merge that first to avoid conflicts).
+`import_duplicates_nonfatal.md` (done).
